@@ -528,15 +528,337 @@ curl http://localhost:10000/get
 ***
 ***
 
+# Да
 
 ***
 ***
 ***
 
+Отлично! Давайте создадим лабораторный стенд для разработки и тестирования **Envoy Proxy** и **EnvoyFilter**. Ниже представлен подробный план действий:
+
+---
+
+## 🧰 Инструменты и окружение
+
+### 1. Установка необходимых инструментов
+
+Убедитесь, что на вашей машине установлены следующие инструменты:
+
+- **Docker**:для контейнеризации приложени
+- **Kind** или **Minikube**:для запуска локального Kubernetes-кластер
+- **kubectl**:для управления Kubernete
+- **istioctl**:для установки и управления Isti
+- **curl** или **httpie**:для отправки HTTP-запросо
+- **Envoy**:для запуска прокси-сервера вне Isti
+
+### 2. Создание Kubernetes-кластера с Istio
+
+#### С использованием Kind:
+
+1.Создайте кластер
+
+   ```bash
+   kind create cluster --name envoy-lab
+   ```
+
+2.Установите Istio
+
+   ```bash
+   istioctl install --set profile=demo -y
+   ```
+
+3.Включите автоматическую инъекцию sidecar-прокси
+
+   ```bash
+   kubectl label namespace default istio-injection=enabled
+   ```
+
+---
+
+## 🧪 Разработка и тестирование EnvoyFilter
+
+### 1. Развертывание тестового приложения
+Разверните приложение `httpbin` для тестировани:
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.20/samples/httpbin/httpbin.yaml
+``
+
+Проверьте, что поды работаю:
+
+```bash
+kubectl get pods
+``
+
+
+### 2. Создание простого EnvoyFilter
+Создайте файл `add-header-lua.yaml` со следующим содержимы:
+
+```yaml
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: add-header-lua
+spec:
+  workloadSelector:
+    labels:
+      app: httpbin
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: SIDECAR_INBOUND
+        listener:
+          portNumber: 8000
+          filterChain:
+            filter:
+              name: "envoy.filters.network.http_connection_manager"
+              subFilter:
+                name: "envoy.filters.http.router"
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.lua
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+            inlineCode: |
+              function envoy_on_request(request_handle)
+                request_handle:headers():add("x-added-header", "true")
+              end
+``
+
+Примените фильт:
+
+```bash
+kubectl apply -f add-header-lua.yaml
+``
+
+
+### 3. Тестирование фильтра
+Пробросьте порт и отправьте запро:
+
+```bash
+kubectl port-forward svc/httpbin 8080:8000
+curl -v http://localhost:8080/get
+``
+
+В ответе должен присутствовать заголовок `x-added-header: true.
+
+---
+
+## 🔍 Отладка и мониторин
+
+Используйте следующие команды для отлади:
+- Просмотр конфигурации маршрутв:
+  
+```bash
+  istioctl proxy-config routes <pod-name>
+  ``
+
+- Просмотр конфигурации слушателй:
+  
+```bash
+  istioctl proxy-config listeners <pod-name>
+  ``
+
+- Просмотр логов проки:
+  
+```bash
+  kubectl logs <pod-name> -c istio-proxy
+  ``
+
+
+---
+
+## 📦 Разработка собственных фильтров
+
+### 1. Lua-фильты
+
+Создайте Lua-скрипты для различных задач, таких ак:
+- Логирование запрсов
+- Модификация заголоков
+- Аутентификция
+
+Пример Lua-фильра:
+
+
+```lua
+function envoy_on_request(request_handle)
+  local path = request_handle:headers():get(":path")
+  if path == "/forbidden" then
+    request_handle:respond(
+      {[":status"] = "403"},
+      "Access Forbidden"
+    )
+  end
+end
+``
+
+
+### 2. WebAssembly-фильты
+
+Для более сложных задач можно использовать WebAssembly-фильтры. Используйте [Proxy-Wasm SDK](https://github.com/proxy-wasm) для разработки фильтров на Rust илиGo.
+
+---
+
+## 🗂️ Структура проета
+
+Создайте следующую структуру каталгов
+
+
+```bash
+envoy-lab/
+├── filters/
+│   ├── lua/
+│   │   └── add-header.lua
+│   └── wasm/
+│       └── custom-filter.wasm
+├── manifests/
+│   ├── httpbin.yaml
+│   └── envoyfilter.yaml
+├── scripts/
+│   ├── deploy.sh
+│   └── test.sh
+├── README.md
+└── Makefile```
+
+В `Makefile` можно определить команды для автоматизации задач, таких как развертывание и тестировние.
+
+---
+
+## 📚 Дополнительные ресурсы
+
+- [Официальная документация по EnvoyFilter](https://istio.io/latest/docs/reference/config/networking/envoy-filter/)
+- [Примеры EnvoyFilter на GitHub](https://github 
 
 ***
 ***
 ***
+
+```yaml
+
+# вот этот фильтр не работает:
+
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: add-header-lua
+spec:
+  workloadSelector:
+    labels:
+      app: httpbin
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: SIDECAR_INBOUND
+        listener:
+          portNumber: 8000
+          filterChain:
+            filter:
+              name: "envoy.filters.network.http_connection_manager"
+              subFilter:
+                name: "envoy.filters.http.router"
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.lua
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+            inlineCode: |
+              function envoy_on_request(request_handle)
+                request_handle:headers():add("x-added-header", "true")
+              end
+
+
+
+# вот отладочная информация:
+
+k get envoyfilters.networking.istio.io -oyaml
+apiVersion: v1
+items:
+- apiVersion: networking.istio.io/v1alpha3
+  kind: EnvoyFilter
+  metadata:
+    annotations:
+      kubectl.kubernetes.io/last-applied-configuration: |
+        {"apiVersion":"networking.istio.io/v1alpha3","kind":"EnvoyFilter","metadata":{"annotations":{},"name":"add-header-lua","namespace":"default"},"spec":{"configPatches":[{"applyTo":"HTTP_FILTER","match":{"context":"SIDECAR_INBOUND","listener":{"filterChain":{"filter":{"name":"envoy.filters.network.http_connection_manager","subFilter":{"name":"envoy.filters.http.router"}}},"portNumber":8080}},"patch":{"operation":"INSERT_BEFORE","value":{"name":"envoy.filters.http.lua","typed_config":{"@type":"type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua","inlineCode":"function envoy_on_request(request_handle)\n  request_handle:headers():add(\"x-added-header\", \"true\")\nend\n"}}}}],"workloadSelector":{"labels":{"app":"httpbin"}}}}
+    creationTimestamp: "2025-04-11T17:34:38Z"
+    generation: 1
+    name: add-header-lua
+    namespace: default
+    resourceVersion: "7842"
+    uid: 85065f67-aa92-4992-9c60-60efff505b46
+  spec:
+    configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: SIDECAR_INBOUND
+        listener:
+          filterChain:
+            filter:
+              name: envoy.filters.network.http_connection_manager
+              subFilter:
+                name: envoy.filters.http.router
+          portNumber: 8080
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.lua
+          typed_config:
+            '@type': type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+            inlineCode: |
+              function envoy_on_request(request_handle)
+                request_handle:headers():add("x-added-header", "true")
+              end
+    workloadSelector:
+      labels:
+        app: httpbin
+kind: List
+metadata:
+  resourceVersion: ""
+
+
+
+
+curl -v http://localhost:8080/get
+* Host localhost:8080 was resolved.
+* IPv6: ::1
+* IPv4: 127.0.0.1
+*   Trying [::1]:8080...
+* Connected to localhost (::1) port 8080
+> GET /get HTTP/1.1
+> Host: localhost:8080
+> User-Agent: curl/8.7.1
+> Accept: */*
+> 
+* Request completely sent off
+< HTTP/1.1 200 OK
+< Access-Control-Allow-Credentials: true
+< Access-Control-Allow-Origin: *
+< Content-Type: application/json; charset=utf-8
+< Date: Fri, 11 Apr 2025 17:42:36 GMT
+< Content-Length: 249
+< 
+{
+  "args": {},
+  "headers": {
+    "Accept": [
+      "*/*"
+    ],
+    "Host": [
+      "localhost:8080"
+    ],
+    "User-Agent": [
+      "curl/8.7.1"
+    ]
+  },
+  "method": "GET",
+  "origin": "127.0.0.1:56172",
+  "url": "http://localhost:8080/get"
+}
+* Connection #0 to host localhost left intact
+ # ПОМОГИ разобраться
+```
+
 
 
 ***
