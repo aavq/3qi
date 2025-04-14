@@ -2360,9 +2360,187 @@ istioctl proxy-config listeners httpbin-87dbf56c4-pchsb -o json | jq '.[] | {add
 ***
 ***
 
+Отлично, спасибо — теперь 100% понятно, что происходит.
+
+---
+
+## 📌 Что ты видишь в `listeners`?
+
+```json
+{
+  "address": null,
+  "port": null,
+  "name": "0.0.0.0_8080"
+}
+```
+
+Это говорит о том, что:
+- В **SIDECAR_INBOUND контексте** действительно **создан listener на порту 8080**
+- Это именно тот listener, куда попадает входящий трафик от `kubectl port-forward svc/httpbin 8080:8080`
+
+### Значит, **вот этот фильтр абсолютно корректен и должен применяться:**
+
+```yaml
+listener:
+  portNumber: 8080
+```
+
+Но — он **не применяется**. Почему?
+
+---
+
+## 🧠 Причина: **listener `0.0.0.0_8080` принадлежит контексту `SIDECAR_OUTBOUND`**
+
+Это известная тонкость Istio.
+
+### Вот как это выглядит внутри:
+- `0.0.0.0_<port>` → OUTBOUND (трафик *из* Pod-а наружу)
+- `virtualInbound` → INBOUND (всё входящее через Envoy)
+
+🔍 То есть:
+
+| Listener           | Контекст        | Пояснение                        |
+|--------------------|-----------------|----------------------------------|
+| `0.0.0.0_8080`     | **SIDECAR_OUTBOUND** | Listener для исходящего HTTP |
+| `virtualInbound`   | **SIDECAR_INBOUND**  | Единственный Inbound Listener   |
+
+---
+
+## ✅ Итог: Тебе нужно **не указывать `portNumber`**, а использовать `virtualInbound`
+
+Потому что весь входящий трафик **проходит через `virtualInbound`**, а не напрямую через `8080`.
+
+---
+
+## 💥 Рабочий универсальный Lua-фильтр (с `virtualInbound`)
+
+```yaml
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: add-header-lua
+spec:
+  workloadSelector:
+    labels:
+      app: httpbin
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: SIDECAR_INBOUND
+        listener:
+          name: "virtualInbound"  # 👈 критически важно!
+          filterChain:
+            filter:
+              name: "envoy.filters.network.http_connection_manager"
+              subFilter:
+                name: "envoy.filters.http.router"
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.lua
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+            inlineCode: |
+              function envoy_on_request(request_handle)
+                request_handle:headers():add("x-added-header", "true")
+              end
+```
+
+---
+
+## 🚀 Действия
+
+1. Удали старый фильтр:
+   ```bash
+   kubectl delete envoyfilter add-header-lua --ignore-not-found
+   ```
+
+2. Примени этот:
+   ```bash
+   kubectl apply -f add-header-lua.yaml
+   ```
+
+3. Перезапусти pod:
+   ```bash
+   kubectl rollout restart deployment httpbin
+   ```
+
+4. Протестируй:
+   ```bash
+   kubectl port-forward svc/httpbin 8080:8080
+   curl -v http://localhost:8080/get
+   ```
+
+---
+
+## ✅ Ожидаемый результат
+
+```json
+"headers": {
+  "x-added-header": "true",
+  ...
+}
+```
+
+---
+
+Если хочешь, могу дать полную версию `Makefile` и шаблонов для такого "универсального" Lua-фильтра.
+
+
 ***
 ***
 ***
+
+вот результат: 
+
+```bash
+curl -v http://localhost:8080/get 
+
+* Host localhost:8080 was resolved.
+* IPv6: ::1
+* IPv4: 127.0.0.1
+*   Trying [::1]:8080...
+* Connected to localhost (::1) port 8080
+> GET /get HTTP/1.1
+> Host: localhost:8080
+> User-Agent: curl/8.7.1
+> Accept: */*
+> 
+* Request completely sent off
+< HTTP/1.1 200 OK
+< Access-Control-Allow-Credentials: true
+< Access-Control-Allow-Origin: *
+< Content-Type: application/json; charset=utf-8
+< Date: Fri, 11 Apr 2025 18:57:23 GMT
+< Content-Length: 249
+<
+```
+
+```json
+ 
+{
+  "args": {},
+  "headers": {
+    "Accept": [
+      "*/*"
+    ],
+    "Host": [
+      "localhost:8080"
+    ],
+    "User-Agent": [
+      "curl/8.7.1"
+    ]
+  },
+  "method": "GET",
+  "origin": "127.0.0.1:51816",
+  "url": "http://localhost:8080/get"
+}
+
+```
+
+
+* Connection #0 to host localhost left intact
+
 
 ***
 ***
