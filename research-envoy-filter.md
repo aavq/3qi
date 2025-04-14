@@ -868,6 +868,116 @@ curl -v http://localhost:8080/get
 ***
 ***
 
+Ты всё сделал почти правильно — но проблема, скорее всего, **в контексте фильтра и в номере порта**. Давай разберёмся **по шагам**.
+
+---
+
+## 🔍 Что работает, а что — нет
+
+### Что видно из вывода `curl`:
+- Ответ от `httpbin` приходит.
+- Заголовок `x-added-header: true` **не добавляется** → значит, **Lua-фильтр не применился**.
+
+---
+
+## ✅ Проверка критических моментов
+
+### 1. ❗ Порт в `portNumber`
+Ты используешь `portNumber: 8080`, но:
+
+- У **httpbin**, развернутого с Istio, **контейнер слушает 80**, а **sidecar-порт, через который заходит трафик — 15006**
+- Если ты хочешь обрабатывать **входящие запросы**, стоит использовать **`context: SIDECAR_INBOUND` и `portNumber: 15006`**  
+  (или **SIDECAR_OUTBOUND**, если цель — внешние вызовы)
+
+### 2. ❗ Контекст
+Ты используешь `SIDECAR_INBOUND`, но запрос идёт **на httpbin через `kubectl port-forward`**, т.е. через **истиофильтр обрабатывает `OUTBOUND`-трафик**. Поэтому фильтр не срабатывает.
+
+➡ **Решение**: поменяй контекст на `SIDECAR_OUTBOUND` и **target port на 80** (целевой порт httpbin).
+
+---
+
+## ✅ Рабочий пример для твоего случая
+
+```yaml
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: add-header-lua
+spec:
+  workloadSelector:
+    labels:
+      app: httpbin
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: SIDECAR_OUTBOUND
+        listener:
+          portNumber: 80
+          filterChain:
+            filter:
+              name: "envoy.filters.network.http_connection_manager"
+              subFilter:
+                name: "envoy.filters.http.router"
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.lua
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+            inlineCode: |
+              function envoy_on_request(request_handle)
+                request_handle:headers():add("x-added-header", "true")
+              end
+```
+
+Затем:
+```bash
+kubectl apply -f add-header-lua.yaml
+kubectl rollout restart deploy/httpbin
+kubectl port-forward svc/httpbin 8080:8000
+curl -v http://localhost:8080/get
+```
+
+Теперь ты должен увидеть:
+
+```json
+"headers": {
+  "x-added-header": "true",
+  ...
+}
+```
+
+---
+
+## 🔧 Альтернативный способ (через `istioctl`)
+
+Чтобы убедиться, что фильтр применился:
+
+```bash
+istioctl proxy-config listeners <httpbin-pod-name> -o json | grep lua
+```
+
+Или:
+
+```bash
+istioctl proxy-config bootstrap <httpbin-pod-name> -o json | jq
+```
+
+---
+
+## 🎯 Вариант для `INBOUND` (если хочешь модифицировать входящий трафик)
+
+Тогда фильтр будет выглядеть так:
+```yaml
+context: SIDECAR_INBOUND
+portNumber: 15006
+```
+
+⚠ **Но важно**: httpbin по умолчанию **не принимает трафик напрямую в INBOUND, если ты используешь `port-forward`**. Лучше проверить с клиентом, который делает реальный запрос к сервису внутри кластера (например, `sleep`-pod).
+
+---
+
+## Хочешь, я тебе дам полный Makefile + манифесты для тестирования Lua-фильтров?
 
 ***
 ***
