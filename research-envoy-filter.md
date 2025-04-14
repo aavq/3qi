@@ -2620,9 +2620,270 @@ kubectl exec -it <sleep-pod-name> -c sleep -- curl -s -v http://httpbin.default.
 ***
 ***
 
+Отлично! Ниже я подготовил **автоматизированный лабораторный стенд** с `Makefile`, манифестами и Lua-фильтром, который:
+
+✅ Разворачивает:
+- `httpbin` на порту 8080
+- `sleep` как тестовый клиент
+- `EnvoyFilter`, добавляющий заголовок `x-added-header: true`
+
+✅ Позволяет:
+- Отправить запрос из `sleep` в `httpbin`
+- Проверить, что заголовок добавился через фильтр Lua
+- Полностью автоматизировать запуск, проверку и очистку
+
+---
+
+## 📁 Структура проекта `envoyfilter-lab/`
+
+```
+envoyfilter-lab/
+├── filters/
+│   └── add-header-lua.yaml
+├── manifests/
+│   ├── httpbin.yaml
+│   └── sleep.yaml
+├── Makefile
+└── README.md
+```
+
+---
+
+## 📄 `filters/add-header-lua.yaml`
+
+```yaml
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: add-header-lua
+  namespace: default
+spec:
+  workloadSelector:
+    labels:
+      app: httpbin
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: SIDECAR_INBOUND
+        listener:
+          name: "virtualInbound"
+          filterChain:
+            filter:
+              name: "envoy.filters.network.http_connection_manager"
+              subFilter:
+                name: "envoy.filters.http.router"
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.lua
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+            inlineCode: |
+              function envoy_on_request(request_handle)
+                request_handle:headers():add("x-added-header", "true")
+              end
+```
+
+---
+
+## 📄 `manifests/httpbin.yaml`
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: httpbin
+  labels:
+    app: httpbin
+spec:
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+  selector:
+    app: httpbin
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: httpbin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: httpbin
+  template:
+    metadata:
+      labels:
+        app: httpbin
+    spec:
+      containers:
+      - name: httpbin
+        image: docker.io/mccutchen/go-httpbin:v2.15.0
+        ports:
+        - containerPort: 8080
+```
+
+---
+
+## 📄 `manifests/sleep.yaml`
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sleep
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sleep
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sleep
+  template:
+    metadata:
+      labels:
+        app: sleep
+    spec:
+      serviceAccountName: sleep
+      containers:
+      - name: sleep
+        image: curlimages/curl
+        command: ["/bin/sleep", "infinity"]
+```
+
+---
+
+## 📄 `Makefile`
+
+```makefile
+.PHONY: all deploy test clean
+
+all: deploy test
+
+deploy:
+	kubectl label ns default istio-injection=enabled --overwrite
+	kubectl apply -f manifests/httpbin.yaml
+	kubectl apply -f manifests/sleep.yaml
+	kubectl apply -f filters/add-header-lua.yaml
+	kubectl rollout status deployment httpbin
+	kubectl rollout status deployment sleep
+
+test:
+	@echo "⏳ Ожидание готовности sleep pod..."
+	@sleep 10
+	@SLEEP_POD=$$(kubectl get pod -l app=sleep -o jsonpath='{.items[0].metadata.name}'); \
+	echo "🚀 Выполняем curl из $$SLEEP_POD → httpbin..."; \
+	kubectl exec -it $$SLEEP_POD -c sleep -- curl -s http://httpbin:8080/get | jq '.headers["X-Added-Header"]'
+
+clean:
+	kubectl delete -f filters/add-header-lua.yaml --ignore-not-found
+	kubectl delete -f manifests/httpbin.yaml --ignore-not-found
+	kubectl delete -f manifests/sleep.yaml --ignore-not-found
+```
+
+---
+
+## ✅ Установка и тестирование
+
+```bash
+make all
+```
+
+📋 Ты увидишь:
+```bash
+"true"
+```
+
+Если Lua-фильтр сработал.
+
+---
+
+## 🧼 Удаление стенда
+
+```bash
+make clean
+```
+
+---
+
+Хочешь, я упакую это всё в `.zip` или создам GitHub-репозиторий для загрузки?
+
 ***
 ***
 ***
+
+вот, смотри: 
+
+```bash
+kubectl exec -it sleep-868c754c4b-6l6dv -- curl http://httpbin.default.svc.cluster.local:8080/get -v
+```
+
+```bash
+E0411 21:03:20.205895   25097 websocket.go:296] Unknown stream id 1, discarding message
+* Host httpbin.default.svc.cluster.local:8080 was resolved.
+* IPv6: (none)
+* IPv4: 10.107.81.174
+*   Trying 10.107.81.174:8080...
+* Connected to httpbin.default.svc.cluster.local (10.107.81.174) port 8080
+* using HTTP/1.x
+> GET /get HTTP/1.1
+> Host: httpbin.default.svc.cluster.local:8080
+> User-Agent: curl/8.13.0
+> Accept: */*
+> 
+* Request completely sent off
+< HTTP/1.1 200 OK
+< access-control-allow-credentials: true
+< access-control-allow-origin: *
+< content-type: application/json; charset=utf-8
+< date: Fri, 11 Apr 2025 19:03:20 GMT
+< content-length: 737
+< x-envoy-upstream-service-time: 10
+< server: envoy
+<
+```
+
+```json
+{
+  "args": {},
+  "headers": {
+    "Accept": [
+      "*/*"
+    ],
+    "Host": [
+      "httpbin.default.svc.cluster.local:8080"
+    ],
+    "User-Agent": [
+      "curl/8.13.0"
+    ],
+    "X-Added-Header": [
+      "true"
+    ],
+    "X-Envoy-Attempt-Count": [
+      "1"
+    ],
+    "X-Forwarded-Client-Cert": [
+      "By=spiffe://cluster.local/ns/default/sa/httpbin;Hash=f88b5f653263c10a657d57900d262317c49da7778113120fc3486628d59a8211;Subject=\"\";URI=spiffe://cluster.local/ns/default/sa/sleep"
+    ],
+    "X-Forwarded-Proto": [
+      "http"
+    ],
+    "X-Request-Id": [
+      "4e190cab-580f-9cd4-98e8-f0b8fbc89196"
+    ]
+  },
+  "method": "GET",
+  "origin": "127.0.0.6:37635",
+  "url": "http://httpbin.default.svc.cluster.local:8080/get"
+}
+
+```
+
+* Connection #0 to host httpbin.default.svc.cluster.local left intact
 
 ***
 ***
