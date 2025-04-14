@@ -557,21 +557,21 @@ curl http://localhost:10000/get
 
 1.Создайте кластер
 
-   ```bash
-   kind create cluster --name envoy-lab
-   ```
+```bash
+kind create cluster --name envoy-lab
+```
 
 2.Установите Istio
 
-   ```bash
-   istioctl install --set profile=demo -y
-   ```
+```bash
+istioctl install --set profile=demo -y
+```
 
 3.Включите автоматическую инъекцию sidecar-прокси
 
-   ```bash
-   kubectl label namespace default istio-injection=enabled
-   ```
+```bash
+kubectl label namespace default istio-injection=enabled
+```
 
 ---
 
