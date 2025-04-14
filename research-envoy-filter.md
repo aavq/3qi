@@ -1419,7 +1419,33 @@ istioctl proxy-config listeners $(kubectl get pod -l app=httpbin -o jsonpath='{.
 ***
 ***
 
+# Объясни вот этот код. и как выбирается номер порта?
 
+```yaml
+   configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: SIDECAR_INBOUND
+        listener:
+          portNumber: 8080
+          filterChain:
+            filter:
+              name: "envoy.filters.network.http_connection_manager"
+              subFilter:
+                name: "envoy.filters.http.router" 
+```
+
+# Посмотри вывод вот этих команд: istioctl proxy-config cluster и istioctl proxy-config routes. в них порт 8000 для сервиса httpbin
+
+```bash
+istioctl proxy-config cluster httpbin-6bbd797f74-7flvh |grep httpbin 
+httpbin.default.svc.cluster.local                       8000      -          outbound      EDS              
+```
+
+```bash
+istioctl proxy-config routes httpbin-6bbd797f74-7flvh |grep httpbin  
+8000                                                          httpbin.default.svc.cluster.local:8000                        httpbin, httpbin.default + 1 more...                  /*              
+```
 
 ***
 ***
