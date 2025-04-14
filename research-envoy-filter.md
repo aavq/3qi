@@ -1554,33 +1554,443 @@ istioctl proxy-config listeners httpbin-6bbd797f74-7flvh -o json | jq '.[].addre
 ***
 ***
 
+Спасибо за подробности — теперь всё ясно. Ты поднял **реальную и тонкую деталь**, которая часто путает даже опытных: **номера портов в `listener`-ах Envoy не всегда совпадают с `containerPort`**, и это **нормально**, особенно в контексте Istio.
+
+Разберём всё по полочкам:
+
+---
+
+## 📌 Почему `listener` в `proxy-config` показывает **порт 8000**, а контейнер слушает на `8080`?
+
+Потому что:
+- **Istio автоматически создаёт входящий listener на порту, соответствующем `Service.spec.ports[].port`**, то есть на **8000**
+- А сам контейнер (httpbin) слушает **на 8080**, который **доступен Envoy как “upstream”**, а не как входящий listener
+- То есть:
+  - Port `8000` — это **входной порт для входящего трафика через Envoy**
+  - Port `8080` — это **внутренний порт, на который Envoy проксирует трафик**
+
+---
+
+## 📷 Схема потока:
+
+```
+kubectl port-forward → 8000 (Service.port) 
+→ Envoy Listener на 8000 (SIDECAR_INBOUND) 
+→ Прокси внутри в Pod на 8080 (containerPort)
+```
+
+🔧 Следовательно:
+- **listener на 8000 — это то, что ты должен использовать в `portNumber`**
+- **а не 8080**, даже если так у тебя прописано в `containerPort`
+
+---
+
+## ✅ Исправленный EnvoyFilter
+
+```yaml
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: add-header-lua
+  namespace: default
+spec:
+  workloadSelector:
+    labels:
+      app: httpbin
+      version: v1
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: SIDECAR_INBOUND
+        listener:
+          portNumber: 8000  # ✅ Вот этот порт!
+          filterChain:
+            filter:
+              name: "envoy.filters.network.http_connection_manager"
+              subFilter:
+                name: "envoy.filters.http.router"
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.lua
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+            inlineCode: |
+              function envoy_on_request(request_handle)
+                request_handle:headers():add("x-added-header", "true")
+              end
+```
+
+---
+
+## 🧪 Проверка
+
+```bash
+kubectl apply -f filters/add-header-lua.yaml
+kubectl rollout restart deploy httpbin
+kubectl port-forward svc/httpbin 8080:8000
+curl -v http://localhost:8080/get
+```
+
+✅ Теперь `x-added-header: true` должен появиться.
+
+---
+
+## 🛠 Диагностическая команда (смотри всё по-настоящему):
+
+```bash
+istioctl proxy-config listeners httpbin-<pod> -o json | jq '.[] | {address, name, filterChains}'
+```
+
+Ты увидишь там `portValue: 8000` — это и есть тот listener, в который нужно вставлять Lua-фильтр.
+
+---
+
+Хочешь, я обновлю Makefile и шаблон фильтра с учётом всех этих моментов под твою версию `httpbin`?
+
+
+***
+***
+***
+
+сделай Lua-фильтр, который работает в любом направлении (IN/OUT) и всегда будет добавлять request_handle:headers():add("x-added-header", "true")
+
+***
+***
+***
+
+Отлично, сделаю универсальный `EnvoyFilter`, который добавляет заголовок `x-added-header: true` **во всех направлениях (INBOUND и OUTBOUND)**. Мы используем один и тот же Lua-фильтр и вставим его **в оба контекста**, т.е. в два разных listener-а:  
+- входящий (`SIDECAR_INBOUND`)  
+- исходящий (`SIDECAR_OUTBOUND`)
+
+---
+
+## ✅ Универсальный EnvoyFilter с Lua
+
+```yaml
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: add-header-lua-bidirectional
+  namespace: default
+spec:
+  workloadSelector:
+    labels:
+      app: httpbin
+      version: v1
+  configPatches:
+    # === Входящий трафик ===
+    - applyTo: HTTP_FILTER
+      match:
+        context: SIDECAR_INBOUND
+        listener:
+          portNumber: 8000  # или 80, если в сервисе так указано
+          filterChain:
+            filter:
+              name: "envoy.filters.network.http_connection_manager"
+              subFilter:
+                name: "envoy.filters.http.router"
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.lua
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+            inlineCode: |
+              function envoy_on_request(request_handle)
+                request_handle:headers():add("x-added-header", "true")
+              end
+
+    # === Исходящий трафик ===
+    - applyTo: HTTP_FILTER
+      match:
+        context: SIDECAR_OUTBOUND
+        listener:
+          portNumber: 8000  # порт назначения (тот, на который envoy делает egress вызов)
+          filterChain:
+            filter:
+              name: "envoy.filters.network.http_connection_manager"
+              subFilter:
+                name: "envoy.filters.http.router"
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.lua
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+            inlineCode: |
+              function envoy_on_request(request_handle)
+                request_handle:headers():add("x-added-header", "true")
+              end
+```
+
+---
+
+## 🔍 Примечания:
+
+1. **Два `configPatches`** — один для входящих, один для исходящих запросов.
+2. **Один и тот же Lua-фрагмент** — дублируется, потому что Envoy не даёт переиспользовать `inlineCode` между блоками.
+3. **`portNumber` в OUTBOUND**:
+   - здесь важно указать порт, на который идёт исходящий вызов. Обычно это порт внешнего сервиса или сервисного порта — в твоём случае это тоже `8000`.
+
+---
+
+## 🧪 Проверка
+
+Чтобы проверить **входящий** и **исходящий** трафик:
+- входящий: `curl http://localhost:8080/get`
+- исходящий:
+  - добавь `sleep`-pod
+  - выполни из него:  
+    ```bash
+    kubectl exec -it <sleep-pod> -- curl http://httpbin.default.svc.cluster.local:8000/get -v
+    ```
+
+В обоих случаях ты должен увидеть:
+
+```json
+"x-added-header": "true"
+```
+
+---
+
+Хочешь, я сгенерирую этот YAML как часть полного `Makefile`-проекта?
+
+
+***
+***
+***
+
+Вот такой результат получаю: curl http://localhost:8080/get
+
+```json
+{
+  "args": {},
+  "headers": {
+    "Accept": [
+      "*/*"
+    ],
+    "Host": [
+      "localhost:8080"
+    ],
+    "User-Agent": [
+      "curl/8.7.1"
+    ]
+  },
+  "method": "GET",
+  "origin": "127.0.0.1:38470",
+  "url": "http://localhost:8080/get"
+}
+```
+
+это ожидаемый результат?
+
+***
+***
+***
+
+Хороший вопрос — и **нет**, это **не тот результат, который мы ожидали**.
+
+Ожидаемый результат должен содержать:
+
+```json
+"x-added-header": "true"
+```
+
+А у тебя в `"headers"` этого **нет**, значит **Lua-фильтр не сработал**.
+
+---
+
+## 📌 Быстрый разбор, почему не работает
+
+### 📌 Причина: **`curl http://localhost:8080/get` обращается к Istio Gateway — а не напрямую к Pod**
+
+Ты используешь `kubectl port-forward svc/httpbin 8080:8000`, правильно?
+
+Тогда:
+
+- **localhost:8080** → Service на порту **8000**
+- Service перенаправляет на Pod (port 8080)
+- Входящий трафик обрабатывается Envoy'ем в режиме **`SIDECAR_INBOUND`**
+- Но Envoy **слушает на 8000**, а не на 8080!
+
+Если в `EnvoyFilter` ты указываешь `portNumber: 8080`, он **не матчится** с реальным listener-ом — вот и всё.
+
+---
+
+## ✅ Решение: Укажи правильный `portNumber`
+
+Из вывода:
+```bash
+istioctl proxy-config listeners httpbin-<pod> -o json | jq '.[] | .address.socket_address.port_value'
+```
+ты получил:
+
+```
+8000
+```
+
+➡️ Значит, **в `EnvoyFilter` должен быть `portNumber: 8000`**
+
+---
+
+## 🛠️ Исправленный EnvoyFilter (только входящий)
+
+```yaml
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: add-header-lua-inbound
+spec:
+  workloadSelector:
+    labels:
+      app: httpbin
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: SIDECAR_INBOUND
+        listener:
+          portNumber: 8000  # <- ВАЖНО!
+          filterChain:
+            filter:
+              name: envoy.filters.network.http_connection_manager
+              subFilter:
+                name: envoy.filters.http.router
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.lua
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+            inlineCode: |
+              function envoy_on_request(request_handle)
+                request_handle:headers():add("x-added-header", "true")
+              end
+```
+
+---
+
+## ✅ Что делать дальше?
+
+1. 🔁 Примени исправленный фильтр:
+   ```bash
+   kubectl apply -f add-header-lua-inbound.yaml
+   kubectl rollout restart deploy httpbin
+   ```
+
+2. 🔄 Убедись, что фильтр применился:
+   ```bash
+   istioctl proxy-config listeners httpbin-<pod> -o json | jq '.[].filterChains[].filters[] | select(.name == "envoy.filters.http.lua")'
+   ```
+
+3. 🧪 Сделай `curl` снова:
+   ```bash
+   curl -v http://localhost:8080/get
+   ```
+
+4. 🔍 Проверь, что заголовок `x-added-header` присутствует.
+
+---
+
+## ❓ Если всё ещё не сработает
+
+Дай вывод:
+
+```bash
+istioctl proxy-config listeners <pod-name> -o json | jq '.[] | {address, name, filterChains}'
+```
+
+и:
+
+```bash
+kubectl get envoyfilter -oyaml
+```
+
+Я помогу доточить фильтр до рабочего состояния 💪
 
 ***
 ***
 ***
 
 
+я поменял порты на 8080. в svc, в po и в targetPort
+
+```bash
+ k get po  httpbin-5c5f94b86-lk6wz -oyaml |yq '.spec.containers[].ports'  
+- containerPort: 8080
+  protocol: TCP
+- containerPort: 15090
+  name: http-envoy-prom
+  protocol: TCP
+```
+
+```bash
+k get svc httpbin
+NAME      TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
+httpbin   ClusterIP   10.107.81.174   <none>        8080/TCP   81m
+```
+
+дай мне работающий фильтр для моего случая!!!!
+
 ***
 ***
 ***
 
-
-
-
 ***
 ***
 ***
-
 
 ***
 ***
 ***
 
+***
+***
+***
+
+***
+***
+***
 
 ***
 ***
 ***
 
+***
+***
+***
+
+***
+***
+***
+
+***
+***
+***
+
+***
+***
+***
+
+***
+***
+***
+
+***
+***
+***
+
+***
+***
+***
+
+***
+***
+***
+
+***
+***
+***
 
 ***
 ***
