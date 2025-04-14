@@ -1531,6 +1531,24 @@ istioctl proxy-config listeners <pod-name> -o json | jq '.[].address | select(.s
 ***
 ***
 
+в listeners я вижу порт 8000
+
+```bash
+istioctl proxy-config listeners httpbin-6bbd797f74-7flvh -o json | jq '.[].address' | grep 80
+    "portValue": 8000
+    "portValue": 80
+```
+
+а вот что я вижу в поде:
+
+```yaml
+# k get po  httpbin-6bbd797f74-7flvh -oyaml |yq '.spec.containers[].ports'
+- containerPort: 8080
+  protocol: TCP
+- containerPort: 15090
+  name: http-envoy-prom
+  protocol: TCP
+```
 
 ***
 ***
