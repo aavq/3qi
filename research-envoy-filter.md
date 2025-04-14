@@ -1142,7 +1142,7 @@ make clean
 ```bash
 istioctl proxy-config listeners <pod-name> -o json | jq
 ```
-```
+
 
 ---
 
@@ -1235,22 +1235,190 @@ spec:
 ***
 ***
 
+Спасибо, это полезная информация. Да, в релизе `release-1.25` они обновили `httpbin` на образ от **Kong** (`docker.io/kong/httpbin`), а **порт сервиса** теперь — `8000` (а **контейнер по-прежнему слушает на 80**).
+
+Вот как это влияет на твою работу с `EnvoyFilter`:
+
+---
+
+## 📌 Ключевые детали из нового `httpbin.yaml`:
+
+| Параметр              | Значение                 |
+|------------------------|--------------------------|
+| Контейнерный порт      | `80`                     |
+| Service порт           | `8000`                   |
+| Selector               | `app: httpbin`           |
+| Version label          | `version: v1`            |
+| Имя образа             |
 
 
+Отлично! Ты установил версию `httpbin` из Istio `release-1.25`, где:
+
+- **Сервисный порт — 8000**
+- **Контейнерный (target) порт — 80**
+- Используется образ `kong/httpbin`
+- `app: httpbin` и `version: v1` — это ключевые метки, которые можно использовать в `workloadSelector`
+
+---
+
+## 🔍 Что это меняет для твоего EnvoyFilter?
+
+### ✅ Сервис слушает на **8000**  
+→ Это означает, что `curl http://localhost:8080/get` идёт на сервис `httpbin:8000`, проксируемый Istio-прокси, а внутри контейнер слушает на 80.
+
+### ❗ В EnvoyFilter ты **должен ориентироваться на
 
 ***
 ***
 ***
 
+```yaml
+# Я установил чуть более свежий релиз вот отсюда: https://raw.githubusercontent.com/istio/istio/release-1.25/samples/httpbin/httpbin.yaml, он выглядит вот так: 
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: httpbin
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: httpbin
+  labels:
+    app: httpbin
+    service: httpbin
+spec:
+  ports:
+  - name: http
+    port: 8000
+    targetPort: 8080
+  selector:
+    app: httpbin
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: httpbin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: httpbin
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: httpbin
+        version: v1
+    spec:
+      serviceAccountName: httpbin
+      containers:
+      - image: docker.io/mccutchen/go-httpbin:v2.15.0
+        imagePullPolicy: IfNotPresent
+        name: httpbin
+        ports:
+        - containerPort: 8080
+```
 
 ***
 ***
 ***
 
+Отлично, теперь всё ясно! Ты используешь свежий `httpbin`, и это **влияет на конфигурацию `EnvoyFilter`**, поскольку у него:
+
+- В **Pod'е** контейнер слушает на `8080`
+- В **Service** используется порт `8000` → он проброшен к `8080`
+- Метки: `app: httpbin`, `version: v1`
+
+---
+
+## 💡 Что это значит для `EnvoyFilter`?
+
+### 🧠 Обновлённая схема:
+- **INBOUND** (входящий трафик в Pod):  
+  → в Envoy проходит через **порт 15006 (default listener)**
+- **OUTBOUND** (вызовы из Pod куда-то):  
+  → если httpbin сам что-то вызывает
+
+Т.к. ты тестируешь **входящий трафик** на `httpbin` через `kubectl port-forward` или через Gateway, то нужен **контекст `SIDECAR_INBOUND`** и **порт `8080`**.
+
+---
+
+## ✅ Рабочий `EnvoyFilter` для твоей ситуации:
+
+```yaml
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: add-header-lua
+  namespace: default
+spec:
+  workloadSelector:
+    labels:
+      app: httpbin
+      version: v1
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: SIDECAR_INBOUND
+        listener:
+          portNumber: 8080
+          filterChain:
+            filter:
+              name: "envoy.filters.network.http_connection_manager"
+              subFilter:
+                name: "envoy.filters.http.router"
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.lua
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+            inlineCode: |
+              function envoy_on_request(request_handle)
+                request_handle:headers():add("x-added-header", "true")
+              end
+```
+
+---
+
+## 🧪 Проверка
+
+```bash
+kubectl apply -f filters/add-header-lua.yaml
+kubectl rollout restart deploy httpbin
+kubectl port-forward svc/httpbin 8080:8000
+curl -v http://localhost:8080/get
+```
+
+**В ответе должен быть:**
+```json
+"x-added-header": "true"
+```
+
+---
+
+## 🛠 Проверка, что фильтр применяется
+
+```bash
+istioctl proxy-config listeners $(kubectl get pod -l app=httpbin -o jsonpath='{.items[0].metadata.name}') -o json | jq '.'
+```
+
+Ищи фильтр `envoy.filters.http.lua` в выводе. Если его нет — фильтр не применяется, возможно:
+
+- `workloadSelector` не совпал
+- `portNumber` указан неправильно
+- Istio не подхватил обновлённую конфигурацию (нужен `rollout restart`)
+
+---
+
+Хочешь, я теперь пересоберу весь проект (`Makefile`, фильтры, манифесты) под **эту конкретную версию httpbin**?
 
 ***
 ***
 ***
+
 
 
 ***
