@@ -2159,9 +2159,202 @@ curl -s -v http://localhost:8080/get | jq .
 ***
 ***
 
+
+Спасибо за подробный отчёт. На этом этапе у нас есть вся информация, и я скажу точно: **Lua-фильтр _не применяется_**, несмотря на правильную конфигурацию, **потому что порт 8080 — это не тот порт, на который Envoy добавляет INBOUND listener в твоём случае.**
+
+---
+
+## ✅ Что уже подтверждено:
+- **EnvoyFilter применился корректно**
+- **Container и Service используют порт 8080**
+- **Проброс порта работает (`kubectl port-forward`)**
+- **Заголовок `x-added-header` в ответе **ОТСУТСТВУЕТ**
+
+---
+
+## 🚨 Причина: Envoy **INBOUND listener** не слушает на 8080
+
+Несмотря на то что ты используешь 8080 везде, **istio-proxy (Envoy) не создаёт INBOUND listener на этом порту напрямую**, если ты не пробрасываешь явно через `VirtualService` и Gateway или используешь Ingress.
+
+---
+
+## ✅ Что нужно проверить сейчас
+
+Выполни команду:
+
+```bash
+istioctl proxy-config listeners <httpbin-pod-name> -o json | jq '.[] | {address: .address.socket_address.address, port: .address.socket_address.port_value, name}'
+```
+
+Скопируй и пришли результат сюда — мы увидим **на каких портах действительно слушает Envoy** в INBOUND контексте.
+
+---
+
+## 🔍 Альтернатива: универсальный фильтр без `portNumber`
+
+Хочешь применить фильтр **ко всем INBOUND listener'ам**, независимо от порта?
+
+Тогда просто **убери `portNumber` из `match.listener`**:
+
+### 🛠 Универсальный Lua-фильтр без `portNumber`
+
+```yaml
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: add-header-lua-anyport
+spec:
+  workloadSelector:
+    labels:
+      app: httpbin
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: SIDECAR_INBOUND
+        listener:
+          filterChain:
+            filter:
+              name: envoy.filters.network.http_connection_manager
+              subFilter:
+                name: envoy.filters.http.router
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.lua
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+            inlineCode: |
+              function envoy_on_request(request_handle)
+                request_handle:headers():add("x-added-header", "true")
+              end
+```
+
+📌 Этот фильтр будет применён **ко всем INBOUND HTTP listeners**, независимо от номера порта. Он должен точно сработать, если в твоём Pod действительно используется **HTTP (а не TCP-only)**.
+
+---
+
+## 🧪 После применения
+
+```bash
+kubectl apply -f add-header-lua-anyport.yaml
+kubectl rollout restart deployment httpbin
+kubectl port-forward svc/httpbin 8080:8080
+curl -v http://localhost:8080/get
+```
+
+В `headers` ты должен увидеть:
+
+```json
+"x-added-header": "true"
+```
+
+---
+
+Готов продолжить, если хочешь пройтись по `proxy-config listeners` и понять, на каких портах **фактически** слушает Envoy.
+
 ***
 ***
 ***
+
+ты просил. вот: 
+
+```bash
+istioctl proxy-config listeners httpbin-87dbf56c4-pchsb -o json | jq '.[] | {address: .address.socket_address.address, port: .address.socket_address.port_value, name}'
+```
+
+
+```json
+{
+  "address": null,
+  "port": null,
+  "name": "0.0.0.0_15010"
+}
+{
+  "address": null,
+  "port": null,
+  "name": "0.0.0.0_80"
+}
+{
+  "address": null,
+  "port": null,
+  "name": "10.101.247.196_443"
+}
+{
+  "address": null,
+  "port": null,
+  "name": "10.96.0.10_53"
+}
+{
+  "address": null,
+  "port": null,
+  "name": "10.96.9.190_443"
+}
+{
+  "address": null,
+  "port": null,
+  "name": "10.96.0.10_9153"
+}
+{
+  "address": null,
+  "port": null,
+  "name": "10.96.9.190_15012"
+}
+{
+  "address": null,
+  "port": null,
+  "name": "0.0.0.0_15014"
+}
+{
+  "address": null,
+  "port": null,
+  "name": "10.109.137.81_443"
+}
+{
+  "address": null,
+  "port": null,
+  "name": "10.101.247.196_15021"
+}
+{
+  "address": null,
+  "port": null,
+  "name": "10.101.247.196_31400"
+}
+{
+  "address": null,
+  "port": null,
+  "name": "10.96.0.1_443"
+}
+{
+  "address": null,
+  "port": null,
+  "name": "10.101.247.196_15443"
+}
+{
+  "address": null,
+  "port": null,
+  "name": "0.0.0.0_8080"
+}
+{
+  "address": null,
+  "port": null,
+  "name": "virtualOutbound"
+}
+{
+  "address": null,
+  "port": null,
+  "name": "virtualInbound"
+}
+{
+  "address": null,
+  "port": null,
+  "name": "0.0.0.0_15090"
+}
+{
+  "address": null,
+  "port": null,
+  "name": "0.0.0.0_15021"
+}
+```
 
 ***
 ***
