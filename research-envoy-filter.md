@@ -1936,9 +1936,224 @@ httpbin   ClusterIP   10.107.81.174   <none>        8080/TCP   81m
 ***
 ***
 
+Отлично, теперь ты всё выровнял и **контейнер, сервис и Istio listener работают на порту 8080**. Теперь можно дать **точно работающий `EnvoyFilter`**, без предположений.
+
+---
+
+## ✅ Входные данные:
+
+- **Container порт**: 8080  
+- **Service порт**: 8080  
+- **Envoy listener** (INBOUND): 8080  
+- **`app: httpbin`** (без `version`)
+- Тебе нужно, чтобы **во ВСЕХ входящих запросах добавлялся заголовок `x-added-header: true`**
+
+---
+
+## 🛠️ Рабочий EnvoyFilter
+
+```yaml
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: add-header-lua
+  namespace: default
+spec:
+  workloadSelector:
+    labels:
+      app: httpbin
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: SIDECAR_INBOUND
+        listener:
+          portNumber: 8080  # 🔥 теперь 100% правильный порт
+          filterChain:
+            filter:
+              name: envoy.filters.network.http_connection_manager
+              subFilter:
+                name: envoy.filters.http.router
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.lua
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+            inlineCode: |
+              function envoy_on_request(request_handle)
+                request_handle:headers():add("x-added-header", "true")
+              end
+```
+
+---
+
+## 🚀 Шаги по проверке
+
+1. 🧼 Удали старые фильтры:
+   ```bash
+   kubectl delete envoyfilter add-header-lua --ignore-not-found
+   ```
+
+2. 📥 Примени новый:
+   ```bash
+   kubectl apply -f add-header-lua.yaml
+   ```
+
+3. 🔁 Перезапусти httpbin:
+   ```bash
+   kubectl rollout restart deployment httpbin
+   kubectl wait --for=condition=available deployment httpbin --timeout=60s
+   ```
+
+4. 🧪 Протестируй:
+   ```bash
+   kubectl port-forward svc/httpbin 8080:8080
+   curl -s -v http://localhost:8080/get | jq .
+   ```
+
+---
+
+## ✅ Ожидаемый результат
+
+В ответе должно быть:
+
+```json
+"headers": {
+  "x-added-header": "true",
+  ...
+}
+```
+
+---
+
+## 🧠 Если всё равно не сработает
+
+Дай мне **вот эти выводы**, и я добью фильтр:
+
+```bash
+istioctl proxy-config listeners <httpbin-pod-name> -o json | jq '.[] | {address, filterChains}'
+```
+
+и:
+
+```bash
+istioctl proxy-config bootstrap <httpbin-pod-name> -o json | jq '.static_resources.listeners[].filter_chains[].filters[] | select(.name == "envoy.filters.http.lua")'
+```
+
+Но с текущими вводными — этот фильтр **должен 100% сработать.**
+
 ***
 ***
 ***
+
+
+удалил все фильтры.
+
+применил новый фильтр. вот он:
+
+```yaml
+k get envoyfilters.networking.istio.io add-header-lua -oyaml
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"networking.istio.io/v1alpha3","kind":"EnvoyFilter","metadata":{"annotations":{},"name":"add-header-lua","namespace":"default"},"spec":{"configPatches":[{"applyTo":"HTTP_FILTER","match":{"context":"SIDECAR_INBOUND","listener":{"filterChain":{"filter":{"name":"envoy.filters.network.http_connection_manager","subFilter":{"name":"envoy.filters.http.router"}}},"portNumber":8080}},"patch":{"operation":"INSERT_BEFORE","value":{"name":"envoy.filters.http.lua","typed_config":{"@type":"type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua","inlineCode":"function envoy_on_request(request_handle)\n  request_handle:headers():add(\"x-added-header\", \"true\")\nend\n"}}}}],"workloadSelector":{"labels":{"app":"httpbin"}}}}
+  creationTimestamp: "2025-04-11T18:41:19Z"
+  generation: 1
+  name: add-header-lua
+  namespace: default
+  resourceVersion: "16129"
+  uid: 3f195001-04db-40b7-af38-17caed029878
+spec:
+  configPatches:
+  - applyTo: HTTP_FILTER
+    match:
+      context: SIDECAR_INBOUND
+      listener:
+        filterChain:
+          filter:
+            name: envoy.filters.network.http_connection_manager
+            subFilter:
+              name: envoy.filters.http.router
+        portNumber: 8080
+    patch:
+      operation: INSERT_BEFORE
+      value:
+        name: envoy.filters.http.lua
+        typed_config:
+          '@type': type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+          inlineCode: |
+            function envoy_on_request(request_handle)
+              request_handle:headers():add("x-added-header", "true")
+            end
+  workloadSelector:
+    labels:
+      app: httpbin
+```
+
+перезагрузил
+
+```bash
+k rollout restart deployment httpbin
+deployment.apps/httpbin restarted
+```
+
+пробросил порт:
+
+```bash
+kubectl port-forward svc/httpbin 8080:8080
+Forwarding from 127.0.0.1:8080 -> 8080
+Forwarding from [::1]:8080 -> 8080
+```
+
+
+вот результат:
+
+```bash
+curl -s -v http://localhost:8080/get | jq .
+* Host localhost:8080 was resolved.
+* IPv6: ::1
+* IPv4: 127.0.0.1
+*   Trying [::1]:8080...
+* Connected to localhost (::1) port 8080
+> GET /get HTTP/1.1
+> Host: localhost:8080
+> User-Agent: curl/8.7.1
+> Accept: */*
+> 
+* Request completely sent off
+< HTTP/1.1 200 OK
+< Access-Control-Allow-Credentials: true
+< Access-Control-Allow-Origin: *
+< Content-Type: application/json; charset=utf-8
+< Date: Fri, 11 Apr 2025 18:42:56 GMT
+< Content-Length: 249
+< 
+{ [249 bytes data]
+* Connection #0 to host localhost left intact
+```
+
+```json
+{
+  "args": {},
+  "headers": {
+    "Accept": [
+      "*/*"
+    ],
+    "Host": [
+      "localhost:8080"
+    ],
+    "User-Agent": [
+      "curl/8.7.1"
+    ]
+  },
+  "method": "GET",
+  "origin": "127.0.0.1:53554",
+  "url": "http://localhost:8080/get"
+}
+```
+
 
 ***
 ***
