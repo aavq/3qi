@@ -989,21 +989,247 @@ portNumber: 15006
 ***
 ***
 
+Супер! Вот минимальный рабочий **лабораторный проект** с `Makefile` и манифестами для тестирования Lua-фильтра через `EnvoyFilter` в Istio.
+
+---
+
+## 📁 Структура проекта `envoy-lab-lua`
+
+```
+envoy-lab-lua/
+├── filters/
+│   └── add-header-lua.yaml
+├── manifests/
+│   └── httpbin.yaml
+├── Makefile
+├── README.md
+```
+
+---
+
+## 📄 `filters/add-header-lua.yaml` — EnvoyFilter с Lua
+
+```yaml
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: add-header-lua
+  namespace: default
+spec:
+  workloadSelector:
+    labels:
+      app: httpbin
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: SIDECAR_OUTBOUND
+        listener:
+          portNumber: 80
+          filterChain:
+            filter:
+              name: envoy.filters.network.http_connection_manager
+              subFilter:
+                name: envoy.filters.http.router
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.lua
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+            inlineCode: |
+              function envoy_on_request(request_handle)
+                request_handle:headers():add("x-added-header", "true")
+              end
+```
+
+---
+
+## 📄 `manifests/httpbin.yaml` — сервис для теста
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: httpbin
+spec:
+  ports:
+    - port: 80
+      targetPort: 80
+      name: http
+  selector:
+    app: httpbin
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: httpbin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: httpbin
+  template:
+    metadata:
+      labels:
+        app: httpbin
+    spec:
+      containers:
+        - name: httpbin
+          image: docker.io/kennethreitz/httpbin
+          ports:
+            - containerPort: 80
+```
+
+---
+
+## 📄 `Makefile` — автоматизация
+
+```makefile
+NAMESPACE=default
+
+deploy: deploy-httpbin deploy-filter
+
+deploy-httpbin:
+	kubectl apply -f manifests/httpbin.yaml -n $(NAMESPACE)
+	kubectl label ns $(NAMESPACE) istio-injection=enabled --overwrite
+	kubectl rollout restart deploy httpbin -n $(NAMESPACE)
+	kubectl wait --for=condition=available deploy/httpbin -n $(NAMESPACE) --timeout=60s
+
+deploy-filter:
+	kubectl apply -f filters/add-header-lua.yaml -n $(NAMESPACE)
+
+port-forward:
+	kubectl port-forward svc/httpbin 8080:80 -n $(NAMESPACE)
+
+test:
+	curl -s -v http://localhost:8080/get | jq .
+
+clean:
+	kubectl delete -f filters/add-header-lua.yaml -n $(NAMESPACE) || true
+	kubectl delete -f manifests/httpbin.yaml -n $(NAMESPACE) || true
+```
+
+---
+
+## 📄 `README.md` — инструкция
+
+```markdown
+# EnvoyFilter Lua Lab
+
+Минималистичный стенд для тестирования Lua-фильтров через EnvoyFilter в Istio.
+
+## ⚙️ Установка
+
+```bash
+make deploy
+make port-forward
+```
+
+## 🧪 Тест
+
+```bash
+make test
+```
+
+## 🧹 Очистка
+
+```bash
+make clean
+```
+
+## 🔍 Проверка
+
+```bash
+istioctl proxy-config listeners <pod-name> -o json | jq
+```
+```
+
+---
+
+## ✅ Что дальше?
+
+Хочешь, я сразу создам этот проект и скину тебе ссылку на GitHub-репозиторий? Или тебе удобнее получить это как `.zip`-архив?
 
 ***
 ***
 ***
 
+# Скинь ссылку на GitHub-репозиторий
 
 ***
 ***
 ***
 
+К сожалению, я не могу предоставить прямую ссылку на GitHub-репозиторий, так как не имею доступа к интернету или к внешним ресурсам. Однако вы можете самостоятельно создать репозиторий, следуя инструкциям, которые я предоставил ранее. Если у вас возникнут трудности или потребуется дополнительная помощь, пожалуйста, дайте знать, и я постараюсь помочь вам максимально эффективно.
 
 ***
 ***
 ***
 
+```yaml
+# Я установил чуть более свежий релиз вот отсюда: https://raw.githubusercontent.com/istio/istio/release-1.25/samples/httpbin/httpbin.yaml, он выглядит вот так: # Copyright Istio Authors
+
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+
+##################################################################################################
+# httpbin service
+##################################################################################################
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: httpbin
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: httpbin
+  labels:
+    app: httpbin
+    service: httpbin
+spec:
+  ports:
+  - name: http
+    port: 8000
+    targetPort: 80
+  selector:
+    app: httpbin
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: httpbin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: httpbin
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: httpbin
+        version: v1
+    spec:
+      serviceAccountName: httpbin
+      containers:
+      - image: docker.io/kong/httpbin
+        imagePullPolicy: IfNotPresent
+        name: httpbin
+        ports:
+        - containerPort: 80
+
+```
 
 ***
 ***
