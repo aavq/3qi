@@ -582,13 +582,13 @@ kubectl label namespace default istio-injection=enabled
 
 ```bash
 kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.20/samples/httpbin/httpbin.yaml
-``
+```
 
 Проверьте, что поды работаю:
 
 ```bash
 kubectl get pods
-``
+```
 
 
 ### 2. Создание простого EnvoyFilter
@@ -624,13 +624,13 @@ spec:
               function envoy_on_request(request_handle)
                 request_handle:headers():add("x-added-header", "true")
               end
-``
+```
 
 Примените фильт:
 
 ```bash
 kubectl apply -f add-header-lua.yaml
-``
+```
 
 
 ### 3. Тестирование фильтра
@@ -639,7 +639,7 @@ kubectl apply -f add-header-lua.yaml
 ```bash
 kubectl port-forward svc/httpbin 8080:8000
 curl -v http://localhost:8080/get
-``
+```
 
 В ответе должен присутствовать заголовок `x-added-header: true.
 
@@ -651,20 +651,20 @@ curl -v http://localhost:8080/get
 - Просмотр конфигурации маршрутв:
   
 ```bash
-  istioctl proxy-config routes <pod-name>
-  ``
+istioctl proxy-config routes <pod-name>
+```
 
 - Просмотр конфигурации слушателй:
   
 ```bash
-  istioctl proxy-config listeners <pod-name>
-  ``
+istioctl proxy-config listeners <pod-name>
+```
 
 - Просмотр логов проки:
   
 ```bash
-  kubectl logs <pod-name> -c istio-proxy
-  ``
+kubectl logs <pod-name> -c istio-proxy
+```
 
 
 ---
@@ -691,7 +691,7 @@ function envoy_on_request(request_handle)
     )
   end
 end
-``
+```
 
 
 ### 2. WebAssembly-фильты
@@ -734,10 +734,11 @@ envoy-lab/
 ***
 ***
 
+
+
+# Вот этот фильтр не работает:
+
 ```yaml
-
-# вот этот фильтр не работает:
-
 apiVersion: networking.istio.io/v1alpha3
 kind: EnvoyFilter
 metadata:
@@ -767,12 +768,13 @@ spec:
               function envoy_on_request(request_handle)
                 request_handle:headers():add("x-added-header", "true")
               end
-
+```
 
 
 # вот отладочная информация:
 
-k get envoyfilters.networking.istio.io -oyaml
+```yaml
+# k get envoyfilters.networking.istio.io -oyaml
 apiVersion: v1
 items:
 - apiVersion: networking.istio.io/v1alpha3
@@ -815,10 +817,10 @@ items:
 kind: List
 metadata:
   resourceVersion: ""
+```
 
 
-
-
+```bash
 curl -v http://localhost:8080/get
 * Host localhost:8080 was resolved.
 * IPv6: ::1
