@@ -113,3 +113,51 @@ terminationDrainDuration: 5s
 
 
 ```
+
+
+
+
+```yaml
+ cat filter-to-add-oauth2-filter.yaml         
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: filter-to-add-oauth2-filter
+  namespace: default
+spec:
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: SIDECAR_INBOUND
+        listener:
+          portNumber: 8080
+          filterChain:
+            filter:
+              name: "envoy.filters.network.http_connection_manager"
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: "envoy.filters.http.oauth2"
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.oauth2.v3.OAuth2
+            config:
+              token_endpoint:
+                cluster: "outbound|80||keycloak.default.svc.cluster.local"
+                uri: "http://keycloak.default.svc.cluster.local/realms/demo-realm/protocol/openid-connect/token"
+                timeout: 5s
+              authorization_endpoint: "http://keycloak.default.svc.cluster.local/realms/demo-realm/protocol/openid-connect/auth/"
+              redirect_uri: "http://httpbin.local:8080/get"
+              # redirect_uri: "%REQ(x-forwarded-proto)%://%REQ(:authority)%/callback"
+              forward_bearer_token: true
+              credentials:
+                client_id: "test-client"
+                token_secret:
+                  name: "oauth2-client-secret"
+                token_formation: {}
+              auth_scopes:
+              - user
+              - openid
+              - email
+              resources:
+              - oauth2-resource
+```
