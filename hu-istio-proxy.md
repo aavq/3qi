@@ -1,3 +1,4 @@
+```bash
 
 kubectl logs httpbin-5b6fb5894b-cxh9g -c istio-proxy
 2025-04-16T18:06:17.864280Z	info	FLAG: --concurrency="0"
@@ -110,3 +111,5 @@ terminationDrainDuration: 5s
 2025-04-16T18:06:20.486246Z	warn	Envoy proxy is NOT ready: config received from XDS server, but was rejected: cds updates: 1 successful, 0 rejected; lds updates: 0 successful, 1 rejected
 2025-04-16T18:06:21.487608Z	warn	Envoy proxy is NOT ready: config received from XDS server, but was rejected: cds updates: 1 successful, 0 rejected; lds updates: 0 successful, 1 rejected
 
+
+```
