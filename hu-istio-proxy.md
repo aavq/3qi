@@ -161,3 +161,71 @@ spec:
               resources:
               - oauth2-resource
 ```
+
+
+
+```bash
+
+2025-04-16T16:16:21.521721Z	warning	envoy config external/envoy/source/extensions/config_subscription/grpc/delta_subscription_state.cc:296	delta config for type.googleapis.com/envoy.config.listener.v3.Listener rejected: Error adding/updating listener(s) virtualInbound: Proto constraint validation failed (OAuth2ValidationError.Config: embedded message failed validation | caused by OAuth2ConfigValidationError.Credentials: embedded message failed validation | caused by field: "token_formation", reason: is required): config {
+  token_endpoint {
+    uri: "http://keycloak.default.svc.cluster.local/realms/demo-realm/protocol/openid-connect/token"
+    cluster: "outbound|80||keycloak.default.svc.cluster.local"
+    timeout {
+      seconds: 5
+    }
+  }
+  authorization_endpoint: "http://keycloak.default.svc.cluster.local/realms/demo-realm/protocol/openid-connect/auth/"
+  credentials {
+    client_id: "test-client"
+    token_secret {
+      name: "oauth2-client-secret"
+    }
+  }
+  redirect_uri: "http://httpbin.local:8080/get"
+  forward_bearer_token: true
+  auth_scopes: "user"
+  auth_scopes: "openid"
+  auth_scopes: "email"
+  resources: "oauth2-resource"
+}
+
+	thread=13
+2025-04-16T16:16:21.521776Z	warning	envoy config external/envoy/source/extensions/config_subscription/grpc/grpc_subscription_impl.cc:138	gRPC config for type.googleapis.com/envoy.config.listener.v3.Listener rejected: Error adding/updating listener(s) virtualInbound: Proto constraint validation failed (OAuth2ValidationError.Config: embedded message failed validation | caused by OAuth2ConfigValidationError.Credentials: embedded message failed validation | caused by field: "token_formation", reason: is required): config {
+  token_endpoint {
+    uri: "http://keycloak.default.svc.cluster.local/realms/demo-realm/protocol/openid-connect/token"
+    cluster: "outbound|80||keycloak.default.svc.cluster.local"
+    timeout {
+      seconds: 5
+    }
+  }
+  authorization_endpoint: "http://keycloak.default.svc.cluster.local/realms/demo-realm/protocol/openid-connect/auth/"
+  credentials {
+    client_id: "test-client"
+    token_secret {
+      name: "oauth2-client-secret"
+    }
+  }
+  redirect_uri: "http://httpbin.local:8080/get"
+  forward_bearer_token: true
+  auth_scopes: "user"
+  auth_scopes: "openid"
+  auth_scopes: "email"
+  resources: "oauth2-resource"
+}
+
+	thread=13
+
+token_formation
+
+```
+
+
+
+```bash
+k apply -f filter-to-add-oauth2-filter.yaml        
+Warning: EnvoyFilter exposes internal implementation details that may change at any time. Prefer other APIs if possible, and exercise extreme caution, especially around upgrades.
+Warning: Envoy filter: can't unmarshal Any nested proto type.googleapis.com/envoy.extensions.filters.http.oauth2.v3.OAuth2: unknown field "token_formation" in envoy.extensions.filters.http.oauth2.v3.OAuth2Credentials
+envoyfilter.networking.istio.io/filter-to-add-oauth2-filter created
+
+
+```
