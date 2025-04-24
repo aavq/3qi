@@ -1,0 +1,38 @@
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: httpbin-vs
+  namespace: default
+spec:
+  hosts: ["httpbin.lima"]
+  gateways: ["httpbin-gw"]
+  http:
+  - name: oauth-callback-route
+    match:
+    - uri:
+        exact: /callback
+      queryParams:
+        code:
+          regex: ".+"
+    route:
+    - destination:
+        host: httpbin.default.svc.cluster.local
+        port:
+          number: 8000
+  - name: oauth-callback-redirect
+    match:
+    - uri:
+        exact: /callback
+    redirect:
+      uri: /
+      authority: httpbin.lima
+  - name: httpbin-main
+    match:
+    - uri:
+        prefix: /
+    route:
+    - destination:
+        host: httpbin.default.svc.cluster.local
+        port:
+          number: 8000
