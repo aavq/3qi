@@ -116,3 +116,143 @@ Kubernetes Ingress роутит трафик по HTTP Host-заголовку, 
 
 ### Источники  
  ([How to setup Splunk Connect on to capture logs from Kubernetes](https://community.splunk.com/t5/Installation/How-to-setup-Splunk-Connect-on-to-capture-logs-from-Kubernetes/m-p/506590?utm_source=chatgpt.com), [Collect logs and events with the Collector for Kubernetes](https://docs.splunk.com/observability/gdi/opentelemetry/collector-kubernetes/kubernetes-config-logs.html?utm_source=chatgpt.com), [splunk/splunk-connect-for-kubernetes: Helm charts associated with ...](https://github.com/splunk/splunk-connect-for-kubernetes?utm_source=chatgpt.com), [Source types for the Splunk Add-on for NGINX - Splunk Documentation](https://docs.splunk.com/Documentation/AddOns/released/NGINX/Sourcetypes), [Log format - Ingress-Nginx Controller - Kubernetes](https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/log-format/?utm_source=chatgpt.com), [ConfigMap - Ingress-Nginx Controller - Kubernetes](https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/configmap/?utm_source=chatgpt.com), [Ingress - Kubernetes](https://kubernetes.io/docs/concepts/services-networking/ingress/?utm_source=chatgpt.com), [Solved: Nginx log parsing - Splunk Community](https://community.splunk.com/t5/Splunk-Search/Nginx-log-parsing/m-p/18620?utm_source=chatgpt.com), [Add custom request headers to log_format · Issue #6483 - GitHub](https://github.com/kubernetes/ingress-nginx/issues/6483?utm_source=chatgpt.com), [Accessing ingress-nginx host with host header gives 404 error](https://stackoverflow.com/questions/78380062/accessing-ingress-nginx-host-with-host-header-gives-404-error?utm_source=chatgpt.com))
+
+
+
+***
+***
+***
+
+ Below is a focused troubleshooting playbook that explains **why строковый поиск по <APP_NAME>-<CLUSTER_DNS> ничего не находит** и показывает, как быстро вытянуть нужный виртуальный хост из логов Ingress-Nginx в Splunk.
+
+---
+
+## Вкратце (ключевая причина)
+
+Контейнерные логи, которые Splunk Connect for Kubernetes (SC4K) доставляет во внешний Splunk, приходят как **обёртка-JSON** (поле `log`), внутри которой сидит ещё один JSON-access-log Nginx. Строковый поиск (`"<APP_NAME>-<CLUSTER_DNS>"`) проверяет только видимую строку в первом слое; поэтому, пока вы не распакуете вложенный JSON (командой `spath` или через `KV_MODE=json / INDEXED_EXTRACTIONS=JSON`), Splunk «не видит» содержание поля `vhost`. ([splunk/splunk-connect-for-kubernetes: Helm charts associated with ...](https://github.com/splunk/splunk-connect-for-kubernetes?utm_source=chatgpt.com), [How to use spath with string formatted events? - Splunk Community](https://community.splunk.com/t5/Splunk-Search/How-to-use-spath-with-string-formatted-events/m-p/670568?utm_source=chatgpt.com), [spath - Splunk Documentation](https://docs.splunk.com/Documentation/Splunk/9.4.1/SearchReference/Spath?utm_source=chatgpt.com))
+
+---
+
+## 1 Проверьте, где именно лежит `vhost`
+
+1. Выполните базовый поиск и откройте **сырой (_raw_)** ивент:
+
+   ```spl
+   index=platform*  sourcetype="kube:container:controller"
+   | head 1
+   ```
+
+   Скорее всего вы увидите что-то вроде:
+
+   ```json
+   {
+     "time":"2025-04-29T10:22:13Z",
+     "log":"{\"correlation\":\"…\",\"vhost\":\"my-app.dev.example.com\",\"uri\":\"/\",\"status\":200,…}"
+   }
+   ```
+
+   Обратите внимание: поле `vhost` находится **внутри строки `log`** – то есть на втором уровне JSON. ([How to parse string JSON along with actual JSON?](https://community.splunk.com/t5/Splunk-Search/How-to-parse-string-JSON-along-with-actual-JSON/m-p/594713?search-action-id=182932756620&search-result-uid=594713&utm_source=chatgpt.com), [How to extract fields from JSON which is stored in another field?](https://community.splunk.com/t5/Splunk-Search/How-to-extract-fields-from-JSON-which-is-stored-in-another-field/m-p/227479?utm_source=chatgpt.com))
+
+---
+
+## 2 Одноразовый «ad-hoc» поиск по конкретному vhost
+
+```spl
+index=platform* sourcetype="kube:container:controller"
+| spath input=log               ← распаковываем вложенный JSON
+| search vhost="my-app.dev.example.com"
+| stats count by status uri
+```
+
+* `spath` умеет доставать любые поля из JSON внутри другого поля; параметр `input=` указывает, что нужно разбирать именно `log`. ([spath - Splunk Documentation](https://docs.splunk.com/Documentation/Splunk/9.4.1/SearchReference/Spath?utm_source=chatgpt.com), [How to use spath with string formatted events? - Splunk Community](https://community.splunk.com/t5/Splunk-Search/How-to-use-spath-with-string-formatted-events/m-p/670568?utm_source=chatgpt.com))  
+* После `spath` поле `vhost` становится полноценным и фильтр `search vhost=…` отрабатывает.  
+
+---
+
+## 3 Извлечение регуляркой, если `spath` не подходит
+
+Если по каким-то причинам JSON ломанный или слишком длинный (>5 KБ, спath по-умолчанию обрезает) ([spath - Splunk Documentation](https://docs.splunk.com/Documentation/Splunk/9.4.1/SearchReference/Spath?utm_source=chatgpt.com)):
+
+```spl
+index=platform* sourcetype="kube:container:controller"
+| rex field=log "\"vhost\":\"(?<vhost>[^\"]+)\""
+| search vhost="my-app.dev.example.com"
+```
+
+---
+
+## 4 «Перманентное» решение через props.conf
+
+Чтобы больше не писать `spath/rex`, включите автоматическое парсирование:
+
+```conf
+# $SPLUNK_HOME/etc/apps/SC4K/local/props.conf
+[kube:container:controller]
+KV_MODE = json          # включает JSON-KV-Mode на этапе поиска ([props.conf - Splunk Documentation](https://docs.splunk.com/Documentation/Splunk/latest/admin/propsconf?utm_source=chatgpt.com), [Extract fields from files with structured data - Splunk Documentation](https://docs.splunk.com/Documentation/Splunk/9.4.0/Data/Extractfieldsfromfileswithstructureddata?utm_source=chatgpt.com))
+AUTO_KV_JSON = true     # явно говорим распознавать все ключи
+```
+
+*Если у вас есть доступ к индекс-тайму*, можно добиться ещё быстрее:
+
+```conf
+[kube:container:controller]
+INDEXED_EXTRACTIONS = JSON   # ключи будут индекс-тайм-поля (быстрее поиск) ([Extract fields from files with structured data - Splunk Documentation](https://docs.splunk.com/Documentation/Splunk/9.4.0/Data/Extractfieldsfromfileswithstructureddata?utm_source=chatgpt.com))
+```
+
+После рестарта Splunk достаточно написать просто:
+
+```spl
+index=platform* sourcetype="kube:container:controller" vhost="my-app.dev.example.com"
+```
+
+---
+
+## 5 Типичные причины, почему поиск не отдавал событий
+
+| Причина | Как проверить / исправить |
+|---------|---------------------------|
+| **`KV_MODE` выключен** | Откройте _raw_: если `vhost` внутри `"log":"{...}"`, но в панели «Interesting Fields» нет поля `vhost`, значит JSON не извлечён. Включите `KV_MODE=json` или используйте `spath`. ([props.conf - Splunk Documentation](https://docs.splunk.com/Documentation/Splunk/latest/admin/propsconf?utm_source=chatgpt.com)) |
+| **Обрезка события** (`extraction_cutoff=5000`) | Длинные access-логи могут не парситься `spath` целиком. Увеличьте лимит в `limits.conf` или примените `rex`, который не зависит от этого. ([spath - Splunk Documentation](https://docs.splunk.com/Documentation/Splunk/9.4.1/SearchReference/Spath?utm_source=chatgpt.com)) |
+| **Иной index / sourcetype** | Иногда SC4K пишет в индекс `kube-logs`, а не `platform*`; проверьте аннотацию `splunk.com/index` и Helm-values. ([splunk/splunk-connect-for-kubernetes: Helm charts associated with ...](https://github.com/splunk/splunk-connect-for-kubernetes?utm_source=chatgpt.com), [splunk-connect-for-kubernetes/helm-chart/splunk-connect ... - GitHub](https://github.com/splunk/splunk-connect-for-kubernetes/blob/develop/helm-chart/splunk-connect-for-kubernetes/values.yaml?utm_source=chatgpt.com)) |
+| **Часть hostname** | Если домен содержит точки, не забывайте, что Splunk ищет подстрокой: `dev.example.com` найдёт и `my-app.dev.example.com`. |
+| **Кавычки в запросе** | Поиск `"my-app.dev.example.com"` внутри кавычек ищет *точную* строку; если в raw она без кавычек, то нужно убрать их. |
+
+---
+
+## 6 Полезные паттерны SPL на каждый день
+
+### График 5xx ошибок по vhost
+
+```spl
+index=platform* sourcetype="kube:container:controller"
+| spath input=log
+| search vhost="my-app.dev.example.com" status>=500
+| timechart span=1m count
+```
+
+### Топ URI по конкретному хосту
+
+```spl
+index=platform* sourcetype="kube:container:controller"
+| spath input=log
+| search vhost="my-app.dev.example.com" status!=404
+| top limit=20 uri
+```
+
+---
+
+## 7 Что делать, если `vhost` всё же отсутствует в логах
+
+1. Убедитесь, что контроллер стартует с `--enable-json-logs=true`; без этой опции он пишет plain-text, где `vhost` может не сериализоваться. ([splunk/splunk-connect-for-kubernetes: Helm charts associated with ...](https://github.com/splunk/splunk-connect-for-kubernetes?utm_source=chatgpt.com))  
+2. Проверьте ConfigMap ещё раз: `$host` должен быть внутри **того же** `log-format-upstream`, с которого вы читаете (`log-format-upstream` vs `log-format-escape-json`). ([configMap.yaml - GitHub](https://github.com/splunk/splunk-connect-for-kubernetes/blob/develop/manifests/splunk-kubernetes-logging/configMap.yaml?utm_source=chatgpt.com), [Log format type "cri" not working as expected · Issue #357 - GitHub](https://github.com/splunk/splunk-connect-for-kubernetes/issues/357?utm_source=chatgpt.com))  
+3. После изменения ConfigMap сделайте `kubectl rollout restart deployment ingress-nginx-controller` — старые pod’ы не подтягивают новую конфигурацию сами.  
+
+---
+
+### Итог
+
+* Поиск не работал, потому что hostname находится на *внутреннем* JSON-уровне.  
+* Используйте `spath input=log` **или** настройте `KV_MODE=json` / `INDEXED_EXTRACTIONS=JSON`, чтобы `vhost` стал обычным полем.  
+* Тогда запрос вида `index=… vhost="my-app.dev.example.com"` будет мгновенным и надёжным.
+
+После внесения этих настроек вы сможете строить алерты и дашборды по доменам Ingress столь же легко, как по любым другим полям.
