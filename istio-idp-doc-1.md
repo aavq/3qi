@@ -54,7 +54,28 @@ resources:
 
 Напиши инструкцию о том как это может быть сделано. Учти все возможные варианты. Подумай хорошо.
 
+```yaml
+# k get deployments.apps httpbin -oyaml |yq '.spec.template.metadata.annotations'
+kubectl.kubernetes.io/restartedAt: "2025-04-24T20:27:45+02:00"
+sidecar.istio.io/userVolume: |
+  [{
+  "name": "oauth-secrets",
+  "secret": {
+      "secretName": "envoy-oauth-secrets"
+  }
+  }]
+sidecar.istio.io/userVolumeMount: |
+  [{
+  "name": "oauth-secrets",
+  "mountPath": "/etc/istio/creds",
+  "readOnly": true
+  }]
+```
 
+
+***
+***
+***
 
 python3 - <<'PY'
 import secrets, textwrap, base64, pathlib, json, sys
