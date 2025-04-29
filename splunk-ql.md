@@ -256,3 +256,109 @@ index=platform* sourcetype="kube:container:controller"
 * Тогда запрос вида `index=… vhost="my-app.dev.example.com"` будет мгновенным и надёжным.
 
 После внесения этих настроек вы сможете строить алерты и дашборды по доменам Ingress столь же легко, как по любым другим полям.
+
+
+***
+***
+***
+
+Основная мысль — если в сырых строках Ingress-контроллера домен действительно присутствует, но поиск `"<APP_NAME>-<CLUSTER_DNS>"` не даёт результатов, то обычно виноваты **индекс-/формат-/правила Splunk, а не сам Nginx**. Ниже перечислены самые частые причины (с практическими тестами), начиная с самых «быстрых» для проверки.
+
+---
+
+## 1 Контроллер пишет не тот формат или не подтянул ConfigMap  
+
+| Что проверить | Как проверить |
+|---------------|--------------|
+| **Какой log_format реально используется** | `kubectl exec -it <pod> -- nginx -T | grep -A3 "log_format"` – убедитесь, что в активной секции есть `$host` или `"vhost":`. В ряде версий параметр `log-format-upstream` игнорируется, если одновременно задан `log-format-escape-json`. ([Setting `log_format upstreaminfo escape=json` does not work as ...](https://github.com/kubernetes/ingress-nginx/issues/10566?utm_source=chatgpt.com), [multiple log_formats · Issue #2615 · kubernetes/ingress-nginx - GitHub](https://github.com/kubernetes/ingress-nginx/issues/2615?utm_source=chatgpt.com)) |
+| **Подменяет ли другой Ingress-controller** | При Helm-установке можно случайно запустить два контроллера, и часть Ingress’ов обслужит «чужой» экземпляр, у которого свой log_format. ([Ingress controller processing ingresses with different ... - GitHub](https://github.com/kubernetes/ingress-nginx/issues/10907?utm_source=chatgpt.com)) |
+| **Перезапущены ли pod’ы** | После изменения ConfigMap нужен `kubectl rollout restart deployment ingress-nginx-controller`, иначе новый шаблон логов не подхватится. ([Setting `log_format upstreaminfo escape=json` does not work as ...](https://github.com/kubernetes/ingress-nginx/issues/10566?utm_source=chatgpt.com)) |
+
+---
+
+## 2 Строку «съедает» Splunk-сегментация (точки, дефисы, кавычки)
+
+* Splunk при индексации удаляет пунктуацию, разбивая `my-app.dev.example.com` на токены `my`, `app`, `dev`, `example`, `com`. Поэтому поисковая фраза в кавычках `"my-app.dev.example.com"` может **не** совпасть с токенизированными данными. ([Event segmentation and searching - Splunk Documentation](https://docs.splunk.com/Documentation/SplunkCloud/latest/Search/Eventsegmentationandsearching?utm_source=chatgpt.com))  
+* Используйте один из трёх безопасных способов:  
+
+  ```spl
+  ... | search TERM("my-app.dev.example.com")
+  ... | search my-app\.dev\.example\.com
+  ... | search vhost="my-app.dev.example.com"   <-- если поле извлечено
+  ```  
+
+  `TERM()` заставляет Splunk искать точную подстроку, игнорируя токенизацию. ([Solved: TERM and PREFIX cannot find string with two dashes](https://community.splunk.com/t5/Splunk-Search/TERM-and-PREFIX-cannot-find-string-with-two-dashes/m-p/679366?utm_source=chatgpt.com), [When to escape characters - Splunk Documentation](https://docs.splunk.com/Documentation/SCS/current/Search/Escapecharacters?utm_source=chatgpt.com))  
+
+---
+
+## 3 Поле есть, но не извлекается (KV_MODE / JSON / REX)
+
+1. **Авто-KV выключен.** Если в props.conf для sourcetype стоит `KV_MODE=none`, Splunk не поднимает пары `"vhost":"…"`.  
+2. **JSON-режим не включён.** Поставьте `KV_MODE=json` или `INDEXED_EXTRACTIONS=JSON`, чтобы `vhost` стал полем поиска. ([Configure automatic key-value field extraction - Splunk Documentation](https://docs.splunk.com/Documentation/Splunk/9.4.0/Knowledge/Automatickey-valuefieldextractionsatsearch-time?utm_source=chatgpt.com))  
+3. **Быстрая проверка без изменения конфигов**:  
+
+   ```spl
+   index=platform* sourcetype="kube:container:controller"
+   | spath
+   | search vhost="<APP_NAME>-<CLUSTER_DNS>"
+   ```
+
+   `spath` разворачивает JSON «на лету».  
+
+---
+
+## 4 Домен не попадает в индекс из-за обрезки события
+
+* По-умолчанию Splunk отрезает всё после 10 000 символов (`TRUNCATE`) и разбивает событие после 256 строк (`MAX_EVENTS`). ([Can I change TRUNCATE and MAX_EVENTS to unlimited](https://community.splunk.com/t5/Getting-Data-In/Can-I-change-TRUNCATE-and-MAX-EVENTS-to-unlimited/m-p/56678?utm_source=chatgpt.com), [Solved: Why are larger events are truncated (10000 bytes)?](https://community.splunk.com/t5/Getting-Data-In/Why-are-larger-events-are-truncated-10000-bytes/m-p/122885?utm_source=chatgpt.com))  
+* Если `$host` пишется в хвосте длинной JSON-строки, его просто нет в _raw. Увеличьте лимиты в **props.conf / limits.conf** либо сделайте логи короче.  
+
+---
+
+## 5 Домен пишется не так, как вы ищете
+
+| Симптом | Причина |
+|---------|---------|
+| Есть точка вместо дефиса (`my-app.dev.example.com` vs `my-app-dev.example.com`) | В конфиге Ingress указан `host: my-app.dev.example.com`, а kubernetes-DNS резолвит `my-app-dev.example.com`. Уточните реальное содержимое `$host`. |
+| Поле называется **`http_host`** или **`host`**, а не `vhost` | Это стандартный JSON-формат Nginx Ingress, если не переопределён `vhost`. |
+| `host` зарезервировано самим Splunk как мета-поле; поэтому ищите именно `vhost` или `http_host`. ([props.conf - Splunk Documentation](https://docs.splunk.com/Documentation/Splunk/latest/admin/propsconf?utm_source=chatgpt.com)) |
+
+---
+
+## 6 События уходят в другой index / sourcetype
+
+* SC4K и OTEL-Collector по-умолчанию пишут в `main`, но любая pod/namespace-аннотация `splunk.com/index` переопределяет это. ([splunk/splunk-connect-for-kubernetes: Helm charts associated with ...](https://github.com/splunk/splunk-connect-for-kubernetes?utm_source=chatgpt.com), [Collect logs and events with the Collector for Kubernetes](https://docs.splunk.com/observability/gdi/opentelemetry/collector-kubernetes/kubernetes-config-logs.html?utm_source=chatgpt.com))  
+* Аналогично, `splunk.com/sourcetype` может сделать sourcetype не `kube:container:controller`, а, например, `nginx:access`. Проверьте метафлаги событий.  
+
+---
+
+## 7 Лайф-чек-лист поиска
+
+```spl
+index=platform* OR index=main sourcetype=*
+| head 1                                        <-- убедитесь, что событие вообще приходит
+| fields _raw                                   <-- домен реально есть?
+| eval has_host=if(match(_raw,"<APP_NAME>"),"YES","NO")
+| stats count by has_host
+```
+
+Если `YES = 0` — домена в логе нет (см. п. 1 и 4).  
+Если `YES > 0`, но обычный поиск не работает — проверьте пункты 2 и 3.
+
+---
+
+## 8 Что делать дальше
+
+1. **Убедитесь**, что `$host` пишется в первых 10 КБ события.  
+2. **Извлеките** поле (`KV_MODE=json` или `spath`).  
+3. **Ищите** через `TERM()` или экранированную строку, либо сразу по полю `vhost=`.  
+4. **Отладьте** ConfigMap — один log_format для всех контроллеров.  
+5. **Зафиксируйте** изменения в props.conf как постоянные.
+
+После этих шагов поиск нужного виртуального хоста станет таким же простым, как поиск по любому другому полю.
+
+
+***
+***
+***
+
+
