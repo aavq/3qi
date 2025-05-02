@@ -11,6 +11,11 @@
 - Кластер Kubernetes
 - IP адрес, доступный с localhost который может быть использован как External-IP для Load Balancer Istio Ingress Gateway (опционально, если есть IP адрес для доступа к VM Lima с localhost)
 
+Note: Если нет прав sudo или если не хочется создавать отдельно сеть для доступа к VM Lima по выделенному IP, то после установки Istio можно напрямую опубликовать порт 443 ingress gateway на localhot:8443 и использовать IP localhot для DNS записей
+
+```bash
+kubectl port-forward -n istio-system svc/istio-ingressgateway 8443:443 --address 0.0.0.0
+```
 
 1. Установка MetalLB (опционально, если есть IP адрес для доступа к VM Lima с localhost)
 
