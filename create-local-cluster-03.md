@@ -119,7 +119,7 @@ kubectl get secret my-root-ca-secret -n cert-manager -o jsonpath='{.data.ca\.crt
 sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain root.crt
 ```
 
-Отлично cert-manager установлен выпускает сертификаты по запросу. А так же, если шан 1.7 был выполнен, то наш localhost доверяет подписанным СА сертификатам
+Отлично cert-manager установлен выпускает сертификаты по запросу. А так же, если шаг 1.7 был выполнен, то наш localhost доверяет подписанным СА сертификатам
 
 
 ***
