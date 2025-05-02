@@ -1,4 +1,5 @@
 
+
 Note: Для устновки Keycloak в конфигурации с сохранением состояния, требуется база данных, например PostgreSQL. По умолчанию эта база данных устанавливается из того же helm chart keycloak, но для её установки требуется Persisten Volume а следовательно Storage Classes должен быть создан в кластере. Самый простой способ - использовать локальное хранилице storage class - local-path.
 
 1. Установим Storage Class
@@ -204,7 +205,9 @@ echo "192.168.105.4  idp.lima" | sudo tee -a /etc/hosts
 ```
 
 ```bash
-curl -vk https://idp.lima
+curl -k https://idp.lima/auth \
+  --resolve idp.lima:443:192.168.105.4 \
+  -I
 ```
 
 3.7 Добавим запись в configmap coredns
@@ -220,10 +223,19 @@ kubectl -n kube-system edit configmap coredns
         }
 ```
 
+3.8 Перезапустим coredns
 
-3.8 Проверим доступность IdP по имени в кластере
+
+```bash
+kubectl -n kube-system rollout restart deployment coredns
+```
+
+3.9 Проверим доступность IdP по имени в кластере
 
 ```bash
 kubectl run test -it --rm --image busybox:1.36 --restart=Never -- nslookup idp.lima
 ```
 
+***
+***
+***
