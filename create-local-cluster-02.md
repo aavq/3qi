@@ -26,7 +26,30 @@ kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.14.5/confi
 ```
 Note: Ожидаемый результат:
 ```log
-?????????????
+namespace/metallb-system created
+customresourcedefinition.apiextensions.k8s.io/bfdprofiles.metallb.io created
+customresourcedefinition.apiextensions.k8s.io/bgpadvertisements.metallb.io created
+customresourcedefinition.apiextensions.k8s.io/bgppeers.metallb.io created
+customresourcedefinition.apiextensions.k8s.io/communities.metallb.io created
+customresourcedefinition.apiextensions.k8s.io/ipaddresspools.metallb.io created
+customresourcedefinition.apiextensions.k8s.io/l2advertisements.metallb.io created
+customresourcedefinition.apiextensions.k8s.io/servicel2statuses.metallb.io created
+serviceaccount/controller created
+serviceaccount/speaker created
+role.rbac.authorization.k8s.io/controller created
+role.rbac.authorization.k8s.io/pod-lister created
+clusterrole.rbac.authorization.k8s.io/metallb-system:controller created
+clusterrole.rbac.authorization.k8s.io/metallb-system:speaker created
+rolebinding.rbac.authorization.k8s.io/controller created
+rolebinding.rbac.authorization.k8s.io/pod-lister created
+clusterrolebinding.rbac.authorization.k8s.io/metallb-system:controller created
+clusterrolebinding.rbac.authorization.k8s.io/metallb-system:speaker created
+configmap/metallb-excludel2 created
+secret/metallb-webhook-cert created
+service/metallb-webhook-service created
+deployment.apps/controller created
+daemonset.apps/speaker created
+validatingwebhookconfiguration.admissionregistration.k8s.io/metallb-webhook-configuration created
 ```
 
 1.2 Проверяем что MetalLB запущен и Available
