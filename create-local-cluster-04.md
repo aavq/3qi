@@ -71,7 +71,7 @@ kubectl label ns keycloak istio-injection=enabled
 2.5 Создадим файл values-override.yaml, в котором будем переопределять значения установленные по умолчанию в Helm Chart Keycloak
 
 ```yaml
-# values-override.yaml
+# 07-keycloak-values-override.yaml
 ---
 auth:
   adminUser: admin
