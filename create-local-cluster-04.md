@@ -148,7 +148,7 @@ kubectl apply -f 08-certificate-idp-lima.yaml
 
 3.5 Создадим Gateway и VirtualService
 ```yaml
-# gateway-keycloak-gateway.yaml
+# 09-gateway-keycloak-gateway.yaml
 apiVersion: networking.istio.io/v1beta1
 kind: Gateway
 metadata:
@@ -171,13 +171,13 @@ spec:
 ```
 
 ```bash
-kubectl apply -f gateway-keycloak-gateway.yaml
+kubectl apply -f 09-gateway-keycloak-gateway.yaml
 ```
 
 
 ```yaml
 ---
-# virtualservice-keycloak.yaml
+# 10-virtualservice-keycloak.yaml
 apiVersion: networking.istio.io/v1beta1
 kind: VirtualService
 metadata:
@@ -201,7 +201,7 @@ spec:
 
 
 ```bash
-kubectl apply -f virtualservice-keycloak.yaml
+kubectl apply -f 10-virtualservice-keycloak.yaml
 ```
 
 3.6 Создадим DNS запись созданного IdP на localhost (опционально)
