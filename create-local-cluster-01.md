@@ -165,11 +165,7 @@ cat ~/.lima/_config/networks.yaml | yq '.paths.socketVMNet'
 
 3.1 Запустим VM с кластером из шаблона k8s
 
-В случае если шаг 2 был пропущен:
-
-```bash
-limactl start --name k8s template://k8s
-```
+   Два варианта:
 
 В случае если шаг 2 был выполнен:
 
@@ -177,6 +173,11 @@ limactl start --name k8s template://k8s
 limactl start --name k8s --network=lima:shared template://k8s
 ```
 
+В случае если шаг 2 был пропущен:
+
+```bash
+limactl start --name k8s template://k8s
+```
 
 3.2 Проверим что VM с кластером запустилась (опционально)
 
