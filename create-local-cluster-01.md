@@ -41,24 +41,33 @@ limactl start template://docker
   Open an editor to review or modify the current configuration
   Choose another template (docker, podman, archlinux, fedora, ...)
   Exit
-```bash
+```
 
 
 1.3 Проверим, что VM запущена и работает (опционально)
 
+```bash
+brew install docker
+```
 
 ```bash
 docker context create lima-docker --docker "host=unix:///Users/qper/.lima/docker/sock/docker.sock"
+```
+
+Ожидаемый результат:
+```bash
 lima-docker
 Successfully created context "lima-docker"
 ```
 
 ```bash
 docker context use lima-docker
+```
+Ожидаемый результат:
+```bash
 lima-docker
 Current context is now "lima-docker"
 ```
-
 
 ```bash
 qper in ~ λ docker run hello-world
