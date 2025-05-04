@@ -109,7 +109,17 @@ spec:
     kind: ClusterIssuer
 ```
 
-READY должен быть True
+```bash
+kubectl apply -f 05-httpbin-cert.yaml 
+```
+
+Ожидаемый результат:
+
+```bash
+certificate.cert-manager.io/httpbin-cert created
+```
+
+Проверяем статус - READY должен быть True
 
 ```bash
 kubectl -n istio-system get certificates.cert-manager.io httpbin-cert
