@@ -101,7 +101,7 @@ ingress:
 3.1 Установим Keycloak как helm релиз, переопределив некоторые значения через файл values-override.yaml
 
 ```bash
-helm upgrade --install keycloak bitnami/keycloak --namespace keycloak -f values-override.yaml
+helm upgrade --install keycloak bitnami/keycloak --namespace keycloak -f 07-keycloak-values-override.yaml
 ```
 
 3.2 Убедимся что все поды в статусе 
