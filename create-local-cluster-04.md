@@ -36,6 +36,12 @@ local-path (default)   rancher.io/local-path   Delete          WaitForFirstConsu
 
 2. Подготовка к установке Keycloak
 
+
+```bash
+brew install helm
+```
+
+
 2.1 Добавим Helm repository, содержащий Helm Chart Keycloak и обновим индексы репозиториев
 
 ```bash
