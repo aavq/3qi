@@ -93,7 +93,7 @@ clusterissuer.cert-manager.io/my-ca-issuer created
 1.6 Запрашиваем создание тестового сертификата в namespace istio-system
 
 ```yaml
-# httpbin-cert.yaml
+# 05-httpbin-cert.yaml
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
