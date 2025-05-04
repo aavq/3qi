@@ -140,11 +140,11 @@ httpbin-tls   kubernetes.io/tls   3      11s
 1.7 Добавлять корневой сертификат CA cert-manager в доверительные на localhost
 
 ```bash
-kubectl get secret my-root-ca-secret -n cert-manager -o jsonpath='{.data.ca\.crt}' | base64 -d > root.crt
+kubectl get secret my-root-ca-secret -n cert-manager -o jsonpath='{.data.ca\.crt}' | base64 -d > 06-root.crt
 ```
 
 ```bash
-sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain root.crt
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain 06-root.crt
 ```
 
 Отлично cert-manager установлен выпускает сертификаты по запросу. А так же, если шаг 1.7 был выполнен, то наш localhost доверяет подписанным СА сертификатам
