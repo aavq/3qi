@@ -125,7 +125,7 @@ keycloak   ClusterIP   10.106.43.176   <none>        80/TCP    18s
 3.4 Создадим сертификат для доменного имени idp.lima
 
 ```yaml
-# certificate-idp-lima.yaml
+# 08-certificate-idp-lima.yaml
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate
@@ -143,7 +143,7 @@ spec:
 ```
 
 ```bash
-kubectl apply -f certificate-idp-lima.yaml
+kubectl apply -f 08-certificate-idp-lima.yaml
 ```
 
 3.5 Создадим Gateway и VirtualService
