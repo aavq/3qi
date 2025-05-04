@@ -32,7 +32,7 @@ kubectl -n cert-manager get pods
 1.4 Создаём корневой сертификат
 
 ```yaml
-# issuer-root.yaml
+# 03-issuer-root.yaml 
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
@@ -56,13 +56,21 @@ spec:
 ```
 
 ```bash
-kubectl apply -f issuer-root.yaml
+kubectl apply -f 03-issuer-root.yaml 
 ```
+
+Ожидаемый результат:
+
+```bash
+clusterissuer.cert-manager.io/selfsigned-root created
+certificate.cert-manager.io/my-root-ca created
+```
+
 
 1.5. Создаем CA Issuer, который будет подписывать сервисные сертификаты
 
 ```yaml
-# ca-issuer.yaml
+# 04-ca-issuer.yaml 
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
@@ -70,6 +78,16 @@ metadata:
 spec:
   ca:
     secretName: my-root-ca-secret
+```
+
+```bash
+kubectl apply -f 04-ca-issuer.yaml 
+```
+
+Ожидаемый результат:
+
+```bash
+clusterissuer.cert-manager.io/my-ca-issuer created
 ```
 
 1.6 Запрашиваем создание тестового сертификата в namespace istio-system
