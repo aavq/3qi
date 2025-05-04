@@ -131,7 +131,7 @@ apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: idp-lima
-  namespace: keycloak
+  namespace: istio-system
 spec:
   secretName: idp-lima-tls
   issuerRef:
