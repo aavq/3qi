@@ -173,7 +173,7 @@ The same commands work for any extra template VM such as `docker`. ([GitHub][9])
 ### The importan things
 
 * **Pinned versions** guarantee that everyone can reproduces the environment - even months later - without "it works on my laptop" surprises.
-  * **Root‑only `socket_vmnet`** prevents interception of privileged paths.
+* **Root‑only `socket_vmnet`** prevents interception of privileged paths.
 * **Template VMs** this means you can experiment in seconds; there is no lingering state.
 * **Optional networking** keeps default installs minimal yet offers full Layer‑3 reachability when you need a LoadBalancer IP or cross‑VM traffic.
 
