@@ -55,7 +55,7 @@ brew install docker
 ```
 
 ```bash
-docker context create lima-docker --docker "host=unix:///Users/qper/.lima/docker/sock/docker.sock"
+docker context create lima-docker --docker "host=unix://$HOME/.lima/docker/sock/docker.sock"
 ```
 
 Ожидаемый результат:
@@ -101,7 +101,7 @@ INFO[0000] Waiting for the host agent and the driver processes to shut down
 INFO[0000] [hostagent] 2025/04/30 14:51:22 tcpproxy: for incoming conn 127.0.0.1:49877, error dialing "192.168.5.15:22": connect tcp 192.168.5.15:22: connection was refused 
 INFO[0000] [hostagent] Received SIGINT, shutting down the host agent 
 INFO[0000] [hostagent] Shutting down the host agent     
-INFO[0000] [hostagent] Stopping forwarding "/run/user/501/docker.sock" (guest) to "/Users/qper/.lima/docker/sock/docker.sock" (host) 
+INFO[0000] [hostagent] Stopping forwarding "/run/user/501/docker.sock" (guest) to "$HOME/.lima/docker/sock/docker.sock" (host) 
 INFO[0000] [hostagent] Shutting down VZ
 ...
 ```
@@ -117,11 +117,11 @@ INFO[0000] [hostagent] Shutting down VZ
  limactl delete docker 
 INFO[0000] The vz driver process seems already stopped  
 INFO[0000] The host agent process seems already stopped 
-INFO[0000] Removing *.pid *.sock *.tmp under "/Users/qper/.lima/docker" 
-INFO[0000] Removing "/Users/qper/.lima/docker/default_ep.sock" 
-INFO[0000] Removing "/Users/qper/.lima/docker/default_fd.sock" 
-INFO[0000] Removing "/Users/qper/.lima/docker/ha.sock"  
-INFO[0000] Deleted "docker" ("/Users/qper/.lima/docker") 
+INFO[0000] Removing *.pid *.sock *.tmp under "$HOME/.lima/docker" 
+INFO[0000] Removing "$HOME/.lima/docker/default_ep.sock" 
+INFO[0000] Removing "$HOME/.lima/docker/default_fd.sock" 
+INFO[0000] Removing "$HOME/.lima/docker/ha.sock"  
+INFO[0000] Deleted "docker" ("$HOME/.lima/docker") 
 ```
 
 2. Создание сети? (Опционально, нужно только в случае если нужно создавать IP адрес для LB кластера)
