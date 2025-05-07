@@ -170,7 +170,7 @@ The same commands work for any extra template VM such as `docker`. ([GitHub][9])
 * **Template VMs** this means you can experiment in seconds; there is no lingering state.
 * **Optional networking** keeps default installs minimal yet offers full Layer‑3 reachability when you need a LoadBalancer IP or cross‑VM traffic.
 
-Happy clustering!
+Let's keep creating a cluster environment!
 
 [1]: https://github.com/Homebrew/brew/releases "Releases · Homebrew/brew · GitHub"
 [2]: https://github.com/lima-vm/lima/releases "Releases · lima-vm/lima · GitHub"
