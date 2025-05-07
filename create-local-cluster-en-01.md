@@ -6,7 +6,7 @@ On macOS 14+ you can:
 
 1. Install Homebrew 4.5.1.
 2. Install Lima, kubectl, yq and other CLI tools with Homebrew 4.5.1.
-3. *optionally* create a routable `lima:shared` network using the root‑owned **socket\_vmnet 1.2.1** binary.
+3. *optionally* create a routable `lima:shared` network using the root‑owned **socket\_vmnet** 1.2.1 binary.
 4. Launch the **k8s template** that ships Kubernetes 1.33.0. 
 5. Export the generated `kubeconfig`, test `kubectl`,
 
