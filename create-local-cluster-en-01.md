@@ -1,4 +1,4 @@
-# Install local isolated K8S Cluster
+# Install a local single node isolated K8S Cluster
 
 ## Quick summary
 
@@ -65,7 +65,7 @@ yq --version              # yq (https://github.com/mikefarah/yq/) version 4.45.2
 
 > **Security note:** the binary **must be owned by root**; Lima refuses to start in shared mode if the file is writable by normal users. ([GitHub][8])
 
-### 3.1 Install and harden the binary
+### 3.1 Install and harden the binary
 
 ```bash
 brew install socket_vmnet
@@ -75,7 +75,7 @@ sudo install -o root -m 755 \
   /opt/socket_vmnet/bin/socket_vmnet
 ```
 
-### 3.2 Add Lima’s sudoers snippet
+### 3.2 Add Lima’s sudoers snippet
 
 ```bash
 limactl sudoers > etc_sudoers.d_lima
@@ -83,7 +83,7 @@ sudo install -o root etc_sudoers.d_lima /private/etc/sudoers.d/lima
 rm etc_sudoers.d_lima
 ```
 
-### 3.3 Confirm Lima detects the binary
+### 3.3 Confirm Lima detects the binary
 
 ```bash
 yq '.paths.socketVMNet' ~/.lima/_config/networks.yaml
@@ -95,7 +95,7 @@ yq '.paths.socketVMNet' ~/.lima/_config/networks.yaml
 ## 4.  Launch the Kubernetes VM
 
 ```bash
-# With routable IP (requires step 3)
+# With routable IP (requires step 3)
 limactl start --name k8s --network=lima:shared template://k8s
 # Without extra networking
 # limactl start --name k8s template://k8s
