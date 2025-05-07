@@ -12,12 +12,11 @@ On macOS 14+ you can: 1 - install Lima, kubectl, yq and other CLI tools with H
 | --------------------------- | ----------------------------------- |
 | Homebrew (brew)             | **4.5.1** ([GitHub][1])             |
 | Lima (`limactl`)            | **1.0.7** ([GitHub][2])             |
-| socket\_vmnet               | **1.2.1** ([GitHub][2])             |
+| socket\_vmnet               | **1.2.1** ([GitHub][7])             |
 | Docker CLI (optional)       | **28.1.1** ([Homebrew Formulae][3]) |
 | kubectl / Kubernetes CLI    | **1.33.0** ([Homebrew Formulae][4]) |
 | Cluster template Kubernetes | **1.33.0** ([Kubernetes][5])        |
 | yq                          | **4.45.2** ([Homebrew Formulae][6]) |
-| istioctl (optional)         | **1.25.2** ([GitHub][7])            |
 
 ---
 
@@ -179,9 +178,8 @@ Happy clustering!
 [4]: https://formulae.brew.sh/formula/kubernetes-cli "kubernetes-cli  -  Homebrew Formulae"
 [5]: https://kubernetes.io/releases/ "Releases | Kubernetes"
 [6]: https://formulae.brew.sh/formula/yq?utm_source=chatgpt.com "yq - Homebrew Formulae"
-[7]: https://github.com/istio/istio/releases?utm_source=chatgpt.com "Releases · istio/istio - GitHub"
+[7]: https://github.com/lima-vm/socket_vmnet/releases "vmnet.framework support for unmodified rootless QEMU v1.2.1"
 [8]: https://github.com/lima-vm/socket_vmnet?utm_source=chatgpt.com "lima-vm/socket_vmnet: vmnet.framework support for ... - GitHub"
 [9]: https://github.com/lima-vm/lima "GitHub - lima-vm/lima: Linux virtual machines, with a focus on running containers"
 [10]: https://github.com/lima-vm/lima/issues/1259?utm_source=chatgpt.com "shared network mode not working on Mac M1 · Issue #1259 · lima ..."
 [11]: https://istio.io/latest/news/releases/1.25.x/announcing-1.25.2/?utm_source=chatgpt.com "Announcing Istio 1.25.2"
-[12]: https://github.com/lima-vm/socket_vmnet/releases "vmnet.framework support for unmodified rootless QEMU v1.2.1"
