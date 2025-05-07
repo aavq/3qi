@@ -1,22 +1,3 @@
-
-**Analyzing the Instruction**
-
-The user wants me to 1) understand a Russian-language instruction on setting up a Kubernetes cluster in Lima VM on macOS and 2) rewrite it in English using best practices. The key is to list all required packages and their versions, such as Homebrew, Lima, socket\_vmnet, istioctl, and others. The final instruction will explain how to install Lima and create a network, start the cluster with a template, and verify the cluster setup. I'll be concise, clear, and well-structured in the English version, following best instructional practices.
-
-**Creating a structured instruction**
-
-The instruction should be clear and follow best practices for technical documentation, with disclaimers, prerequisites, and clear instructions. I need to include steps for setting up Lima, socket\_vmnet, k8s, and related packages, and to list the versions of each. To do this, I'll need to look up the latest versions of Homebrew, Lima, kubectl, and other packages, ensuring I have multiple citations from reliable sources. The instruction should also include notes on security and potential risks, and I'll need to mention the versions may change over time.
-
-
-**Planning the final instruction**
-
-The instruction needs to include a comprehensive summary first, followed by a clear step-by-step explanation. I'll use best practices in instructional writing, incorporating disclaimers about superuser rights and potential security risks. Packages that need version numbers are Homebrew, Lima, socket\_vmnet, kubectl, istioctl, yq, and possibly Docker. I'll list each with their versions, providing proper citations to validate the versions found. Lastly, I'll make sure to specify macOS requirements and explicitly mention that versions may change.
-
-**Structuring the installation guide**
-
-I’ll create sections for prerequisites, installation steps, and troubleshooting. I'll include a table for package versions, listing citations after each version claim. Each installation step will be detailed with required commands. I'll ensure to list all relevant packages and their versions, citing authoritative sources. Key steps like creating a bridged network, starting the Kubernetes VM, and verifying the cluster will be included. Disclaimers will mention elevated privileges and potential risks. I'll need at least 15 total citations to validate everything.
-
-
 **Structure of the guide**
 
 I’m outlining an installation guide with clear steps: prerequisites, hardware/OS requirements, package versions, and specific installation steps for Homebrew, kubectl, Lima, yq, and socket\_vmnet. Each step includes commands for verification and troubleshooting. Citations for version numbers will be included after claims, aiming for at least 15 citations. I need to ensure the versions are accurately cited from reliable sources like release pages. I'll also include disclaimers on elevated privileges and the risk associated with using certain commands.
