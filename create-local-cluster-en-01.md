@@ -1,4 +1,4 @@
-# Install local K8S Cluster
+# Install local isolated K8S Cluster
 
 ## Quick summary
 
@@ -191,4 +191,3 @@ Let's keep creating a cluster environment!
 [9]: https://github.com/lima-vm/lima "GitHub - lima-vm/lima: Linux virtual machines, with a focus on running containers"
 [10]: https://github.com/lima-vm/lima/issues/1259?utm_source=chatgpt.com "shared network mode not working on Mac M1 · Issue #1259 · lima ..."
 [11]: https://istio.io/latest/news/releases/1.25.x/announcing-1.25.2/?utm_source=chatgpt.com "Announcing Istio 1.25.2"
-
