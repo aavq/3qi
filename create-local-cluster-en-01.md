@@ -2,7 +2,15 @@
 
 ## Quick summary
 
-On macOS 14+ you can: 1 - install Lima, kubectl, yq and other CLI tools with Homebrew 4.5.1. 2 - *optionally* create a routable `lima:shared` network using the root‑owned **socket\_vmnet 1.2.1** binary. 3 - launch the **k8s template** that ships Kubernetes 1.33.0. Export the generated `kubeconfig`, test `kubectl`, and you are ready to develop or demo workloads locally - while keeping the whole stack isolated enough to delete and re‑create in seconds.
+On macOS 14+ you can:
+
+* 1 - Install Homebrew 4.5.1.
+* 2 - Install Lima, kubectl, yq and other CLI tools with Homebrew 4.5.1.
+* 3 - *optionally* create a routable `lima:shared` network using the root‑owned **socket\_vmnet 1.2.1** binary.
+* 4 - Launch the **k8s template** that ships Kubernetes 1.33.0. 
+* 5 - Export the generated `kubeconfig`, test `kubectl`,
+
+And you are ready to develop or demo workloads locally - while keeping the whole stack isolated enough to delete and re‑create in seconds.
 
 ---
 
@@ -183,3 +191,4 @@ Let's keep creating a cluster environment!
 [9]: https://github.com/lima-vm/lima "GitHub - lima-vm/lima: Linux virtual machines, with a focus on running containers"
 [10]: https://github.com/lima-vm/lima/issues/1259?utm_source=chatgpt.com "shared network mode not working on Mac M1 · Issue #1259 · lima ..."
 [11]: https://istio.io/latest/news/releases/1.25.x/announcing-1.25.2/?utm_source=chatgpt.com "Announcing Istio 1.25.2"
+
