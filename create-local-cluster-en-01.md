@@ -153,8 +153,7 @@ A successful reply proves that `socket_vmnet` is working and the VM is reachable
 
 ```bash
 limactl stop k8s     # graceful shutdown
-limactl delete k8s   # irreversible - removes disk image and metadata
-# limactl delete k8s - only in the case when all required experiments have been completed
+# limactl delete k8s - (irreversible) removes disk image and metadata. Only in the case when all required experiments have been completed
 ```
 
 The same commands work for any extra template VM such as `docker`. ([GitHub][9])
@@ -191,4 +190,3 @@ Let's keep creating a cluster environment!
 [9]: https://github.com/lima-vm/lima "GitHub - lima-vm/lima: Linux virtual machines, with a focus on running containers"
 [10]: https://github.com/lima-vm/lima/issues/1259?utm_source=chatgpt.com "shared network mode not working on Mac M1 · Issue #1259 · lima ..."
 [11]: https://istio.io/latest/news/releases/1.25.x/announcing-1.25.2/?utm_source=chatgpt.com "Announcing Istio 1.25.2"
-
