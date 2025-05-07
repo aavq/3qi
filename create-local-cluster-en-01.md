@@ -10,11 +10,11 @@ On macOS 14+ you can: 1 - install Lima, kubectl, yq and other CLI tools with H
 
 | Component                   | Version (verified 2025‑05‑07)       |
 | --------------------------- | ----------------------------------- |
-| Homebrew (brew)             | **4.5.1** ([GitHub][1])             |
+| Homebrew (`brew`)           | **4.5.1** ([GitHub][1])             |
 | Lima (`limactl`)            | **1.0.7** ([GitHub][2])             |
 | socket\_vmnet               | **1.2.1** ([GitHub][7])             |
 | Docker CLI (optional)       | **28.1.1** ([Homebrew Formulae][3]) |
-| kubectl / Kubernetes CLI    | **1.33.0** ([Homebrew Formulae][4]) |
+| Kubernetes CLI (`kubectl`)  | **1.33.0** ([Homebrew Formulae][4]) |
 | Cluster template Kubernetes | **1.33.0** ([Kubernetes][5])        |
 | yq                          | **4.45.2** ([Homebrew Formulae][6]) |
 
