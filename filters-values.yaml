@@ -1,0 +1,17 @@
+filters:
+  - name: cert-parser
+    kind: lua
+    script: ingress-cert-parser.lua
+    sniList:
+      - 001.com
+
+  - name: jwt-user-crds
+    kind: lua
+    script: extract-username-from-jwt.lua
+    sniList:
+      - 001.com
+
+  - name: preserve-auth
+    kind: header-merge
+    sniList:
+      - 001.com
