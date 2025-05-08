@@ -1,0 +1,51 @@
+{{/* templates/envoyfilter.yaml */}}
+{{- range $f := .Values.filters }}
+{{- range $sni := $f.sniList }}
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: {{ printf "%s-%s" $f.name ($sni | replace "." "-" | trunc 48) }}
+  namespace: {{ $f.namespace | default "istio-system" }}
+spec:
+  workloadSelector:
+    labels: {{- toYaml ($f.selector | default (dict "istio" "ingressgateway")) | nindent 6 }}
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: {{ $f.context | default "GATEWAY" }}
+        listener:
+          portNumber: {{ $f.port | default 443 }}
+          filterChain:
+            sni: {{ $sni }}
+            {{- if eq $f.kind "header-merge" }}
+            filter: { name: "envoy.filters.network.http_connection_manager" }
+            {{- end }}
+      patch:
+        operation: {{ ternary "MERGE" "INSERT_BEFORE" (eq $f.kind "header-merge") }}
+{{/* ---------- Lua filter ---------- */}}
+{{- if eq $f.kind "lua" }}
+        value:
+          name: envoy.filters.http.lua
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+{{- if $f.useLegacyInlineCode }}
+            inline_code: |
+{{ $.Files.Get (printf "files/%s" $f.script) | indent 14 }}
+{{- else }}
+            default_source_code:
+              inline_string: |
+{{ $.Files.Get (printf "files/%s" $f.script) | indent 16 }}
+{{- end }}
+{{/* ------- header-merge patch ----- */}}
+{{- else }}
+        value:
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+            request_headers_to_add:
+              - header:
+                  key: "Authorization"
+                  value: "%REQ(Authorization)%"
+                append: false
+{{- end }}
+---
+{{- end }}{{- end }}
