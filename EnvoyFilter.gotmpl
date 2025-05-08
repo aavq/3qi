@@ -1,0 +1,44 @@
+{{- range $idx, $filter := .Values.filters }}
+{{- range $sni := $filter.sniList }}
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: {{ printf "%s-%s" $filter.name ($sni | replace "." "-" | trunc 48) }}
+  namespace: {{ $filter.namespace | default "istio-system" }}
+spec:
+  workloadSelector:
+    labels: {{- toYaml ($filter.selector | default (dict "istio" "ingressgateway")) | nindent 6 }}
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: {{ $filter.context | default "GATEWAY" }}
+        listener:
+          portNumber: {{ $filter.port | default 443 }}
+          filterChain:
+            sni: {{ $sni }}
+            {{- if eq $filter.kind "header-merge" }}
+            filter:
+              name: "envoy.filters.network.http_connection_manager"
+            {{- end }}
+      patch:
+        operation: {{ $filter.operation | default ( ternary "MERGE" "INSERT_BEFORE" (eq $filter.kind "header-merge") ) }}
+        {{- if eq $filter.kind "lua" }}
+        value:
+          name: envoy.filters.http.lua
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+            default_source_code:
+              inline_string: |
+{{ $.Files.Get (printf "files/%s" $filter.script) | indent 16 }}
+        {{- else }}
+        value:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          request_headers_to_add:
+            - header:
+                key: "Authorization"
+                value: "%REQ(Authorization)%"
+              append: false
+        {{- end }}
+---
+{{- end }}
+{{- end }}
