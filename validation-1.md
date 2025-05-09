@@ -93,3 +93,156 @@ Disallowed characters found:
 ```
 
 Хочешь, я сделаю расширенную версию, где можно кастомизировать список допустимых символов (например, разрешить кириллицу)?
+
+
+***
+***
+***
+
+
+Чтобы превратить ваш Python-скрипт в CLI-инструмент на macOS, выполните следующие шаги:
+
+---
+
+## 1. Добавьте шебанг и сделайте файл исполняемым
+
+В начале вашего скрипта добавьте строку:
+
+```python
+#!/usr/bin/env python3
+```
+
+
+
+Затем сделайте файл исполняемым:([Medium][1])
+
+```bash
+chmod +x check_chars.py
+```
+
+
+
+Теперь вы можете запускать скрипт напрямую:
+
+```bash
+./check_chars.py somefile.txt
+```
+
+
+
+---
+
+## 2. Установите скрипт как глобальный CLI-инструмент
+
+### a. Создайте структуру проекта
+
+```bash
+mkdir checkchars
+cd checkchars
+mkdir checkchars
+touch checkchars/__init__.py
+mv ../check_chars.py checkchars/main.py
+touch setup.py
+```
+
+
+
+### b. Настройте `setup.py`
+
+```python
+from setuptools import setup, find_packages
+
+setup(
+    name='checkchars',
+    version='0.1.0',
+    packages=find_packages(),
+    entry_points={
+        'console_scripts': [
+            'checkchars=checkchars.main:main',
+        ],
+    },
+    python_requires='>=3.7',
+)
+```
+
+
+
+### c. Установите пакет локально
+
+```bash
+pip install -e .
+```
+
+
+
+Теперь вы можете использовать команду `checkchars` из любого места:
+
+```bash
+checkchars somefile.txt
+```
+
+
+
+---
+
+## 3. Распространение через PyPI (опционально)
+
+Если вы хотите поделиться инструментом с другими, опубликуйте его на PyPI:
+
+```bash
+pip install wheel twine
+python setup.py sdist bdist_wheel
+twine upload dist/*
+```
+
+
+
+После этого другие пользователи смогут установить ваш инструмент с помощью:
+
+```bash
+pip install checkchars
+```
+
+
+
+---
+
+## 4. Использование Poetry для управления зависимостями (опционально)
+
+Если вы предпочитаете использовать Poetry:([Reddit][2])
+
+### a. Инициализируйте проект
+
+```bash
+poetry init
+```
+
+
+
+### b. Настройте `pyproject.toml`
+
+```toml
+[tool.poetry.scripts]
+checkchars = "checkchars.main:main"
+```
+
+
+
+### c. Установите и используйте CLI
+
+```bash
+poetry install
+poetry run checkchars somefile.txt
+```
+
+
+
+---
+
+Если вам нужна помощь в упаковке проекта или публикации на PyPI, пожалуйста, сообщите, и я предоставлю подробные инструкции.
+
+[1]: https://medium.com/prismai/creating-command-line-tools-in-python-a-step-by-step-guide-b87b29a03a34?utm_source=chatgpt.com "Creating Command-Line Tools in Python: A Step-by-Step Guide"
+[2]: https://www.reddit.com/r/learnpython/comments/182cdyz/how_can_i_create_a_command_line_tool_and_execute/?utm_source=chatgpt.com "How can I create a command line tool and execute it like a script in ..."
+
+
+
