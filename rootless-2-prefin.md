@@ -1,8 +1,8 @@
 # Adapting a privileged binary for secure containerized deployment
 
-**Date:** 28 April 2025
-**Prepared by:** IB FIC HC Team
-**Subject:** Analysis and adaptation of a privileged binary for rootless execution in a containerized environment
+* **Date:** 28 April 2025
+* **Prepared by:** IB FIC HC Team
+* **Subject:** Analysis and adaptation of a privileged binary for rootless execution in a containerized environment
 
 ---
 
@@ -41,7 +41,7 @@ This document include a technical investigation and adaptation process undertake
 
 ### 2.2 Dependency resolution
 
-* Cataloged all shared object dependencies using `ldd`.
+* Cataloged all shared object dependencies using `ldd`
 * Ensured all dependencies were available within the container environment.
 
 ---
@@ -71,7 +71,7 @@ This document include a technical investigation and adaptation process undertake
 
 ### 4.2 Implementation
 
-* **Custom Shared Library:** Developed a shared library overriding `geteuid()` and `getuid()` to return 0.
+* **Custom Shared Library:** Developed a shared library overriding `geteuid()` and `getuid()` to return `0`
 * **Compilation:** Used `gcc` with `-shared` and `-fPIC` flags.
 * **Execution:** Preloaded the custom library using the `LD_PRELOAD` environment variable.
 
