@@ -1,4 +1,4 @@
-# Adapting a privileged pinary for secure containerized deployment
+# Adapting a privileged binary for secure containerized deployment
 
 **Date:** 28 April 2025
 **Prepared by:** IB FIC HC Team
