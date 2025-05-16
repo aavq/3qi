@@ -1,4 +1,4 @@
-**TL;DR – How to wire Envoy’s built-in *oauth2* filter to Istio in a secure, maintainable way**
+** How to wire Envoy’s built-in *oauth2* filter to Istio in a secure, maintainable way**
 
 1. **Decide where you enforce authentication** (ingress gateway *vs.* workload sidecar).
 2. **Generate two credentials — `token` and `hmac` — in Envoy *Secret Discovery Service* (SDS) format.**
