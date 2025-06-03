@@ -1,20 +1,20 @@
-Below is a self-contained, production-ready guide (in English) that distills the long Russian walkthrough you shared into a concise set of best-practice instructions.  It is organized so that a Platform / DevOps engineer can choose either **GATEWAY** or **SIDECAR\_INBOUND** context for Envoy’s OAuth2 filter, prepare the required secrets once, and reuse the same artefacts across environments.
+Below is a self-contained, production-ready guide (in English) that distills the long Russian walkthrough you shared into a concise set of best-practice instructions.  It is organized so that a Platform / DevOps engineer can choose either **GATEWAY** or **SIDECAR\_INBOUND** context for Envoy's OAuth2 filter, prepare the required secrets once, and reuse the same artefacts across environments.
 
 ---
 
 ## 1  Overview
 
-Istio allows you to insert Envoy’s `oauth2` HTTP filter either:
+Istio allows you to insert Envoy's `oauth2` HTTP filter either:
 
 | Context              | Where the filter runs                     | Where the Kubernetes Secret must live |
 | -------------------- | ----------------------------------------- | ------------------------------------- |
 | **GATEWAY**          | On the Ingress Gateway pod (Layer-7 edge) | `istio-system` namespace              |
 | **SIDECAR\_INBOUND** | On each workload sidecar proxy            | Application namespace                 |
 
-The two contexts share the same **secret bundle**— a JSON object that embeds two Envoy SDS Secret resources:
+The two contexts share the same **secret bundle**- a JSON object that embeds two Envoy SDS Secret resources:
 
-1. `hmac.yaml` – an HMAC signing key
-2. `token-secret.yaml` – the client’s `client_secret` (a long-lived, confidential value)
+1. `hmac.yaml` - an HMAC signing key
+2. `token-secret.yaml` - the client's `client_secret` (a long-lived, confidential value)
 
 Those two YAML files are mounted read-only in the container at `/etc/istio/creds`, where Envoy can load them via the SDS **`path_config_source`** mechanism.([Envoy Proxy][1], [Istio][2])
 
@@ -25,10 +25,10 @@ Those two YAML files are mounted read-only in the container at `/etc/istio/creds
 | Tool                            | Purpose                                                                                  |                                        |
 | ------------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------- |
 | `gcloud` CLI                    | Manage Google Secret Manager (GSM)                                                       | ([Google Cloud][3], [Google Cloud][4]) |
-| `jq` & `yq`                     | JSON ↔ YAML manipulation                                                                 |                                        |
-| `python ≥ 3.6`                  | Generate cryptographically strong keys via `secrets` library ([Python documentation][5]) |                                        |
+| `jq` & `yq`                     | JSON <-> YAML manipulation                                                                 |                                        |
+| `python > 3.6`                  | Generate cryptographically strong keys via `secrets` library ([Python documentation][5]) |                                        |
 | `kubectl` / `istioctl`          | Apply manifests and validate Envoy configs ([Istio][2])                                  |                                        |
-| External Secrets Operator (ESO) | Sync GSM → Kubernetes Secret ([External Secrets][6])                                     |                                        |
+| External Secrets Operator (ESO) | Sync GSM -> Kubernetes Secret ([External Secrets][6])                                     |                                        |
 
 Ensure you have cluster-admin access to the target GKE/GKE-on-prem cluster and that Istio is already installed.
 
@@ -88,7 +88,7 @@ jq -n --rawfile h hmac.yaml --rawfile t token-secret.yaml \
    gcloud config set project $PROJECT_ID
    ```
 
-2. **Add a new secret *version*** (or create the secret if it doesn’t exist):
+2. **Add a new secret *version*** (or create the secret if it doesn't exist):
 
    ```bash
    gcloud secrets versions add ENVOY_CRED_BUNDLE \
@@ -101,7 +101,7 @@ jq -n --rawfile h hmac.yaml --rawfile t token-secret.yaml \
 
 ---
 
-## 5  Sync GSM → Kubernetes with External Secrets Operator
+## 5  Sync GSM -> Kubernetes with External Secrets Operator
 
 ```yaml
 apiVersion: external-secrets.io/v1beta1
@@ -178,7 +178,7 @@ Istio injector merges these volumes into the sidecar proxy.([Istio][8], [Istio][
 
 ## 7  Define the Envoy Filter
 
-Below are **diff-friendly** snippets—you need only swap the `context` and `namespace` to move between GATEWAY and SIDECAR\_INBOUND.
+Below are **diff-friendly** snippets-you need only swap the `context` and `namespace` to move between GATEWAY and SIDECAR\_INBOUND.
 
 ### 7.1  Filter template (common parts)
 
@@ -187,7 +187,7 @@ apiVersion: networking.istio.io/v1alpha3
 kind: EnvoyFilter
 metadata:
   name: oauth2-filter
-  namespace: istio-system        # default → app namespace for sidecar mode
+  namespace: istio-system        # default -> app namespace for sidecar mode
 spec:
   priority: 10
   workloadSelector:
@@ -236,10 +236,10 @@ spec:
             auth_scopes: ["openid", "profile", "email"]
             forward_bearer_token: true
             use_refresh_token: true
-  # Cluster definition (identical in both modes) …
+  # Cluster definition (identical in both modes) ...
 ```
 
-Configuration keys follow Envoy’s upstream docs.([Envoy Proxy][1], [Envoy Proxy][10])
+Configuration keys follow Envoy's upstream docs.([Envoy Proxy][1], [Envoy Proxy][10])
 
 ---
 
@@ -264,7 +264,7 @@ If the filter works in sidecar but not gateway, ensure the secrets are mounted o
 ## 9  Security & Operational Tips
 
 * **Rotate secrets** by publishing a new GSM version and allowing ESO to refresh. No redeploy is needed; Envoy hot-reloads SDS files.
-* **Least privilege**: scope the secret only to Envoy; don’t reuse the HMAC key for other services.
+* **Least privilege**: scope the secret only to Envoy; don't reuse the HMAC key for other services.
 * **Automate**: simplify with Kustomize overlays or an `IstioOperator` profile for multi-cluster rollout.
 * **Audit**: enable Google Secret Manager audit logs and Istio telemetry to detect failed auth attempts.
 
@@ -276,7 +276,7 @@ If the filter works in sidecar but not gateway, ensure the secrets are mounted o
 2. Envoy OAuth2 v3 API proto ([Envoy Proxy][10])
 3. Istio EnvoyFilter CRD docs ([Istio][12])
 4. Istio `sidecar.istio.io/userVolume*` annotations ([Istio][8], [Istio][9])
-5. Google Secret Manager “Add secret version” ([Google Cloud][3], [Google Cloud][4])
+5. Google Secret Manager "Add secret version" ([Google Cloud][3], [Google Cloud][4])
 6. External Secrets Operator overview ([External Secrets][6])
 7. Python `secrets` module for key generation ([Python documentation][5])
 8. Secret mount pattern for TLS on Ingress Gateway (analogue for OAuth2) ([Istio][7])
@@ -285,15 +285,15 @@ If the filter works in sidecar but not gateway, ensure the secrets are mounted o
 
 Use this template as a baseline in your Git repository or runbook; parameterize values (`client_id`, IDP endpoints, namespaces) via Helm/Kustomize to ensure repeatability across clusters.
 
-[1]: https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/oauth2_filter?utm_source=chatgpt.com "OAuth2 — envoy 1.35.0-dev-c12fef documentation"
+[1]: https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/oauth2_filter?utm_source=chatgpt.com "OAuth2 - envoy 1.35.0-dev-c12fef documentation"
 [2]: https://istio.io/latest/docs/reference/commands/istioctl/?utm_source=chatgpt.com "Istio / istioctl"
 [3]: https://cloud.google.com/secret-manager/docs/add-secret-version?utm_source=chatgpt.com "Add a secret version | Secret Manager Documentation - Google Cloud"
 [4]: https://cloud.google.com/sdk/gcloud/reference/secrets/versions/add?utm_source=chatgpt.com "gcloud secrets versions add | Google Cloud CLI Documentation"
-[5]: https://docs.python.org/3/library/secrets.html?utm_source=chatgpt.com "secrets — Generate secure random numbers for managing secrets ..."
+[5]: https://docs.python.org/3/library/secrets.html?utm_source=chatgpt.com "secrets - Generate secure random numbers for managing secrets ..."
 [6]: https://external-secrets.io/?utm_source=chatgpt.com "External Secrets Operator: Introduction"
 [7]: https://istio.io/v1.4/docs/tasks/traffic-management/ingress/secure-ingress-mount/?utm_source=chatgpt.com "Secure Gateways (File Mount) - Istio"
 [8]: https://istio.io/latest/docs/reference/config/annotations/?utm_source=chatgpt.com "Resource Annotations - Istio"
 [9]: https://istio.io/v1.19/docs/reference/config/annotations/?utm_source=chatgpt.com "Istioldie 1.19 / Resource Annotations"
-[10]: https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/filters/http/oauth2/v3/oauth.proto?utm_source=chatgpt.com "OAuth (proto) — envoy 1.35.0-dev-c12fef documentation"
+[10]: https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/filters/http/oauth2/v3/oauth.proto?utm_source=chatgpt.com "OAuth (proto) - envoy 1.35.0-dev-c12fef documentation"
 [11]: https://github.com/istio/istio/issues/36999?utm_source=chatgpt.com "Unable to mount volumes to ingress gateway pod using istio ..."
 [12]: https://istio.io/latest/docs/reference/config/networking/envoy-filter/?utm_source=chatgpt.com "Envoy Filter - Istio"
