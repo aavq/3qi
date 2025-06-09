@@ -6,3 +6,7 @@ rsync -aHAX --human-readable \
       /media/ARCH20TB/20241022-backup/ \
       /backup22TB/media/2024/20241022-backup/
 ```
+
+```bash
+rhash --check --skip-ok ./20241022-backup.sha256
+```
