@@ -97,15 +97,19 @@ gantt
 ```
 
 ```mermaid
-flowchart LR
-  A[Browser] -- 1. Request /app --> B[Istio IngressGateway\n(Envoy + OAuth2)]
-  B -- 2. 302 Redirect to IdP --> C[[Cloud IdP\nAuthorize Endpoint]]
-  C -- 3. Login & Consent --> C
-  C -- 4. 302 code+state --> B
-  B -- 5. POST code ➜ token_endpoint --> D[[Cloud IdP\nToken Endpoint]]
-  D -- 6. access_token, id_token --> B
-  B -- 7. Set-Cookie BearerToken\n/ Add Authorization header --> E[Upstream Service]
-  E -- 8. 200 OK --> A
+graph TD
+  subgraph IngressGateway Pod
+    P1[Envoy\nHTTP Connection Manager]
+    P2[Envoy OAuth2 Filter]
+    P3[Envoy Router]
+  end
+  subgraph Control Plane
+    I[istiod]
+    C[K8s API Server]
+  end
+  P1 --> P2 --> P3 --> Upstream
+  I <--> C
+  I ==> P1
 ```
 
 
