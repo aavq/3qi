@@ -115,22 +115,23 @@ graph TD
 ---
 ```mermaid
 flowchart LR
-    %% идентификатор
-    BROWSER[Browser]
-    GATE["Istio IngressGateway<br/>(Envoy + OAuth2)"]
-    AUTH[[Cloud IdP<br/>Authorize Endpoint]]
-    TOKEN[[Cloud IdP<br/>Token Endpoint]]
-    APP[Upstream Service]
+    %% nodes
+    Browser[Browser]
+    Gateway["Istio IngressGateway<br/>(Envoy OAuth2)"]
+    IdPAuth["Cloud IdP<br/>/authorize"]
+    IdPToken["Cloud IdP<br/>/token"]
+    Service[Upstream Service]
 
-    %% основной поток
-    BROWSER -->|1. GET /app| GATE
-    GATE -->|2. 302 Redirect| AUTH
-    AUTH -->|3. User login & consent| AUTH
-    AUTH -->|4. 302 (code + state)| GATE
-    GATE -->|5. POST /code → token| TOKEN
-    TOKEN -->|6. access_token + id_token| GATE
-    GATE -->|7. Bearer token →| APP
-    APP -->|8. 200 OK| BROWSER
+    %% edges – labels are quote-free and use plain ASCII
+    Browser  -->|1 GET /app|              Gateway
+    Gateway  -->|2 302 redirect|          IdPAuth
+    IdPAuth  -->|3 login & consent|       Browser   %% replaces self-loop
+    Browser  -->|4 302 code_state|        Gateway   %% no “+” or parentheses
+    Gateway  -->|5 POST code|             IdPToken
+    IdPToken -->|6 tokens|                Gateway
+    Gateway  -->|7 Bearer|                Service
+    Service  -->|8 200 OK|                Browser
+
 ```
 
 ```mermaid
