@@ -112,6 +112,47 @@ graph TD
   I ==> P1
 ```
 
+---
+```mermaid
+flowchart LR
+    %% идентификатор → "подпись". <br/> — перенос строки, пробелы и «+» в подписи допустимы
+    BROWSER[Browser]
+    GATE["Istio IngressGateway<br/>(Envoy + OAuth2)"]
+    AUTH[[Cloud IdP<br/>Authorize Endpoint]]
+    TOKEN[[Cloud IdP<br/>Token Endpoint]]
+    APP[Upstream Service]
+
+    %% основной поток
+    BROWSER -->|1. GET /app| GATE
+    GATE -->|2. 302 Redirect| AUTH
+    AUTH -->|3. User login & consent| AUTH
+    AUTH -->|4. 302 (code + state)| GATE
+    GATE -->|5. POST /code → token| TOKEN
+    TOKEN -->|6. access_token + id_token| GATE
+    GATE -->|7. Bearer token →| APP
+    APP -->|8. 200 OK| BROWSER
+```
+
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant Gateway as Istio Gateway (Envoy OAuth2)
+    participant IdPAuth  as IdP /authorize
+    participant IdPToken as IdP /token
+    participant Service  as Upstream Service
+
+    Browser ->> Gateway: 1️⃣ GET /app
+    Gateway -->> Browser: 302 Redirect → IdPAuth
+    Browser ->> IdPAuth: 2️⃣ GET /authorize?…
+    IdPAuth -->> Browser: 302 code + state → Gateway
+    Browser ->> Gateway: 3️⃣ GET /oauth2/callback?code=…
+    Gateway ->> IdPToken: 4️⃣ POST /token (code + verifier)
+    IdPToken -->> Gateway: 200 access_token, id_token
+    Gateway ->> Service: 5️⃣ GET /app Authorization: Bearer \<token>
+    Service -->> Gateway: 200 OK
+    Gateway -->> Browser: 200 OK (HTML)
+```
+
 
 ---
 
