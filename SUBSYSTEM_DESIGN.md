@@ -22,24 +22,6 @@
 - Upstream/downstream dependencies diagrammed (C4 Context):contentReference[oaicite:2]{index=2}  
 
 ```mermaid
-graph TD
-  subgraph IngressGateway Pod
-    P1[Envoy HTTP Connection Manager]
-    P2[Envoy OAuth2 Filter]
-    P3[Envoy Router]
-  end
-  subgraph Control Plane
-    I[istiod]
-    C[K8s API Server]
-  end
-  P1 --> P2 --> P3 --> Upstream
-  I <--> C
-  I --> P1
-```
-
----
-
-```mermaid
 flowchart LR
     Browser[Browser]
     Gateway["Istio IngressGateway<br/>(Envoy OAuth2)"]
@@ -57,8 +39,6 @@ flowchart LR
     Gateway-->|"8️⃣ Bearer token"|Service
     Service-->|"9️⃣ 200 OK"|Browser
 ```
-
----
 
 ```mermaid
 sequenceDiagram
