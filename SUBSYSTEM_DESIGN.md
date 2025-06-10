@@ -1,4 +1,3 @@
-````markdown
 # Subsystem Design Document (SSD)
 <!-- Replace {{…}} placeholders and delete helper text when ready -->
 
@@ -25,7 +24,7 @@
 ```mermaid
 flowchart LR
   User -->|HTTP| API_GW --> Payment_Subsystem
-````
+```
 
 ---
 
