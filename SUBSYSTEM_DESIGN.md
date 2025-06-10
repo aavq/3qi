@@ -24,7 +24,7 @@
 ```mermaid
 graph TD
   subgraph IngressGateway Pod
-    P1[Envoy\nHTTP Connection Manager]
+    P1[Envoy HTTP Connection Manager]
     P2[Envoy OAuth2 Filter]
     P3[Envoy Router]
   end
