@@ -34,7 +34,7 @@ graph TD
   end
   P1 --> P2 --> P3 --> Upstream
   I <--> C
-  I ==> P1
+  I --> P1
 ```
 
 ---
