@@ -26,6 +26,43 @@ flowchart LR
   User -->|HTTP| API_GW --> Payment_Subsystem
 ```
 
+```mermaid
+sequenceDiagram
+    autonumber
+    Student->>Admin: Can I enrol this semester?
+    loop enrolmentCheck
+        Admin->>Admin: Check previous results
+    end
+    Note right of Admin: Exam results may <br> be delayed
+    Admin-->>Student: Enrolment success
+    Admin->>Professor: Assign student to tutor
+    Professor-->>Admin: Student is assigned
+```
+
+```mermaid
+gantt
+ title Example Gantt diagram
+    dateFormat  YYYY-MM-DD
+    section Team 1
+    Research & requirements :done, a1, 2020-03-08, 2020-04-10
+    Review & documentation : after a1, 20d
+    section Team 2
+    Implementation      :crit, active, 2020-03-25  , 20d
+    Testing      :crit, 20d
+```
+
+```mermaid
+sequenceDiagram
+    Alice ->> Bob: Hello Bob, how are you?
+    Bob-->>John: How about you John?
+    Bob--x Alice: I am good thanks!
+    Bob-x John: I am good thanks!
+    Note right of John: Bob thinks a long<br/>long time, so long<br/>that the text does<br/>not fit on a row.
+
+    Bob-->Alice: Checking with John...
+    Alice->John: Yes... John, how are you?
+```
+
 ---
 
 ## 3. Interface Contracts (ICD)
