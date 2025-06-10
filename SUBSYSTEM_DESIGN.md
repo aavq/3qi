@@ -115,7 +115,7 @@ graph TD
 ---
 ```mermaid
 flowchart LR
-    %% идентификатор → "подпись". <br/> — перенос строки, пробелы и «+» в подписи допустимы
+    %% идентификатор
     BROWSER[Browser]
     GATE["Istio IngressGateway<br/>(Envoy + OAuth2)"]
     AUTH[[Cloud IdP<br/>Authorize Endpoint]]
