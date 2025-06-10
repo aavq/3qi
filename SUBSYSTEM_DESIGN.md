@@ -113,27 +113,29 @@ graph TD
 ```
 
 ---
+
 ```mermaid
 flowchart LR
-    %% Nodes
     Browser[Browser]
     Gateway["Istio IngressGateway<br/>(Envoy OAuth2)"]
     IdPAuth["Cloud IdP<br/>/authorize"]
     IdPToken["Cloud IdP<br/>/token"]
     Service[Upstream Service]
 
-    %% Edges – все подписи заключены в двойные кавычки
-    Browser  -->|"1 GET /app"|          Gateway
-    Gateway  -->|"2 302 redirect"|      IdPAuth
-    Browser  -->|"3 Login and consent"| IdPAuth
-    IdPAuth  -->|"4 302 code+state"|    Browser
-    Browser  -->|"5 GET /oauth2/callback"| Gateway
-    Gateway  -->|"6 POST code"|         IdPToken
-    IdPToken -->|"7 tokens"|            Gateway
-    Gateway  -->|"8 Bearer token"|      Service
-    Service  -->|"9 200 OK"|            Browser
-
+    Browser-->|"1 GET /app"|Gateway
+    Gateway-->|"2 302 redirect"|IdPAuth
+    Browser-->|"3 login and consent"|IdPAuth
+    IdPAuth-->|"4 302 code+state"|Browser
+    Browser-->|"5 GET /oauth2/callback"|Gateway
+    Gateway-->|"6 POST code"|IdPToken
+    IdPToken-->|"7 tokens"|Gateway
+    Gateway-->|"8 Bearer token"|Service
+    Service-->|"9 200 OK"|Browser
 ```
+
+---
+
+
 
 ```mermaid
 sequenceDiagram
