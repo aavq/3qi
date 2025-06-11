@@ -1,4 +1,8 @@
 ```bash
+rhash -r --sha256 -P --speed -o ./20241022-backup.sha256 .
+```
+
+```bash
 rsync -aHAX --human-readable \
       --info=progress2,name0 --no-inc-recursive \
       --log-file=/tmp/rsync.log \
