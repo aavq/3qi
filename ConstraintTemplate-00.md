@@ -278,3 +278,129 @@ spec:
 ---
 ---
 ---
+
+Ниже приведены полностью валидные манифесты YAML:
+
+* **ConstraintTemplate** — версия с параметром-массивом `domainSuffixes`, чтобы одним Constraint’ом можно было разрешить сразу несколько хвостов DNS.
+* Два образца **Constraint**:
+
+  * `tenant-wildcard-hosts` — показывает, как задать **несколько** суффиксов в одном объекте;
+  * `tenant-wildcard-hosts-uat` — пример, когда вы предпочитаете один суффикс = один Constraint.
+
+Разворачивайте их в любом порядке: Template первым, затем один или несколько Constraint-ов.
+
+---
+
+## ConstraintTemplate `k8stenantwildcardhost-template.yaml`
+
+```yaml
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8stenantwildcardhost
+  annotations:
+    description: |
+      Blocks overly-broad wildcards in Istio Gateways.
+      Permitted pattern:  *.TENANT.<domainSuffix>
+      The tenant label may be any valid RFC-1123 DNS label.
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sTenantWildcardHost
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            domainSuffixes:
+              type: array
+              description: |
+                One or more fixed DNS suffixes that must follow the tenant
+                label, e.g. "asm-uk-01.uat.hc.intranet.corp.com".
+              items:
+                type: string
+  targets:
+  - target: admission.k8s.gatekeeper.sh
+    rego: |
+      package k8stenantwildcardhost
+
+      import data.lib.regex
+
+      ######################################################################
+      # helper: returns true if the host matches any allowed suffix
+      ######################################################################
+      allowed(host) {
+        suffixes := parameters.domainSuffixes
+        some suff
+        suff := suffixes[_]
+        safe := regex.escape_string(suff)
+        pat  := sprintf("^[*]\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?\\.%s$", [safe])
+        re_match(pat, host)
+      }
+
+      ######################################################################
+      # main rule: flag violation for forbidden wildcard hosts
+      ######################################################################
+      violation[{
+        "msg": sprintf(
+          "Wildcard host %q is not permitted. Wildcards must match the pattern *.TENANT.<one of %v>.",
+          [host, parameters.domainSuffixes]),
+        "details": {"host": host}
+      }] {
+        input.review.kind.kind == "Gateway"
+        some server in input.review.object.spec.servers
+        host := server.hosts[_]
+        startswith(host, "*.")   # user действительно использует wildcard
+        not allowed(host)        # …но не в разрешённом месте
+      }
+```
+
+---
+
+## Constraint № 1 — несколько sufix-ов в одном объекте
+
+```yaml
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sTenantWildcardHost
+metadata:
+  name: tenant-wildcard-hosts
+spec:
+  parameters:
+    domainSuffixes:
+      - "asm-uk-01.uat.hc.intranet.corp.com"
+      - "asm-uk-01.prod.hc.intranet.corp.com"
+  match:
+    kinds:
+      - apiGroups: ["networking.istio.io"]
+        kinds: ["Gateway"]
+```
+
+---
+
+## Constraint № 2 — один sufix = один Constraint
+
+```yaml
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sTenantWildcardHost
+metadata:
+  name: tenant-wildcard-hosts-uat
+spec:
+  parameters:
+    domainSuffixes:
+      - "asm-uk-01.uat.hc.intranet.corp.com"
+  match:
+    kinds:
+      - apiGroups: ["networking.istio.io"]
+        kinds: ["Gateway"]
+```
+
+> **Как применить**
+
+```bash
+kubectl apply -f k8stenantwildcardhost-template.yaml
+kubectl apply -f tenant-wildcard-hosts.yaml          # или/и
+kubectl apply -f tenant-wildcard-hosts-uat.yaml
+```
+
+После этого Gatekeeper (v anthos 1.20.3) начнёт отклонять любые `Gateway`, в которых wildcard звёздочка находится выше уровня `TENANT.<domainSuffix>`.
+
