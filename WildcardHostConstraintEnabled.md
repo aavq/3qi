@@ -191,3 +191,96 @@ With these tweaks the chart stays idiomatic and scalable while giving you one cl
 [10]: https://helm.sh/docs/intro/using_helm/?utm_source=chatgpt.com "Using Helm"
 [11]: https://helm.sh/docs/chart_best_practices/custom_resource_definitions/?utm_source=chatgpt.com "Custom Resource Definitions - Helm"
 [12]: https://helm.sh/docs/chart_template_guide/subcharts_and_globals/?utm_source=chatgpt.com "Subcharts and Global Values - Helm"
+
+
+---
+---
+---
+
+
+## Итоговое изменение пути к данным values
+
+Теперь все настройки лежат по пути
+`.Values.constraint.policies.<policy-kind>`
+поэтому шаблон должен читать параметры именно оттуда.
+Ниже — готовые куски **values.yaml** и **templates/k8s-tenant-wildcard-host.yaml** (Helm v3), полностью учитывающие новое расположение данных.
+
+---
+
+## Новый `values.yaml`
+
+```yaml
+constraint:
+  policies:
+    k8sTenantWildcardHost:          # ← имя политики = ключ мапы
+      enabled: true                 # включить/выключить Constraint
+      name: tenant-wildcard-hosts   # (необязательно) кастомное имя CR
+      extraLabels:                  # (необязательно) любые доп-метки
+        environment: uat
+      domainSuffixes:
+        - asm-uk-01.uat.hc.intranet.corp.com
+        - asm-uk-01.prod.hc.intranet.corp.com
+```
+
+*При желании добавляйте рядом другие политики, например `k8sUniqueIngressHost`, — структура «одна мапа `constraint.policies` → несколько политик» масштабируется без конфликтов.*
+
+---
+
+## Обновлённый Helm-шаблон
+
+`templates/k8s-tenant-wildcard-host.yaml`
+
+```yaml
+{{- /*
+Creates a Gatekeeper Constraint (K8sTenantWildcardHost) only when
+constraint.policies.k8sTenantWildcardHost.enabled is true.
+*/ -}}
+
+{{- $cfg := .Values.constraint.policies.k8sTenantWildcardHost | default dict -}}
+{{- if ($cfg.enabled | default false) }}
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sTenantWildcardHost
+metadata:
+  name: {{ $cfg.name | default "tenant-wildcard-hosts" | quote }}
+  labels:
+    app.kubernetes.io/managed-by: helm
+{{- with $cfg.extraLabels }}
+{{ toYaml . | nindent 4 }}
+{{- end }}
+spec:
+  parameters:
+    domainSuffixes:
+{{- range $cfg.domainSuffixes }}
+      - "{{ . }}"
+{{- end }}
+  match:
+    kinds:
+      - apiGroups: ["networking.istio.io"]
+        kinds: ["Gateway"]
+{{- end }}
+```
+
+### Что изменилось по сравнению с прошлой версией
+
+| Раньше                                                        | Теперь                                              |
+| ------------------------------------------------------------- | --------------------------------------------------- |
+| `.Values.policies.k8sTenantWildcardHost`                      | `.Values.constraint.policies.k8sTenantWildcardHost` |
+| Переменная-сокращение `{{- $cfg := .Values.policies... }}`    | `{{- $cfg := .Values.constraint.policies... }}`     |
+| Все остальные блоки (`if`, `range`, `toYaml`) — без изменений | —                                                   |
+
+---
+
+## Проверка
+
+```bash
+# вывести рендер для контроля
+helm template wildcard ./my-chart --values values.yaml | less
+
+# при enabled: false объект не выводится
+helm template wildcard ./my-chart \
+  --set constraint.policies.k8sTenantWildcardHost.enabled=false
+```
+
+После применения (`helm upgrade --install …`) Gatekeeper начнёт отклонять «плохие» Gateway-ресурсы, пользуясь новым Constraint-ом.
+
+
