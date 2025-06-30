@@ -1,0 +1,134 @@
+**Коротко:**
+Argo CD сравнивает *то, что лежит в Git* с *тем, что реально хранит-ся в etcd*.
+При создании `K8sTenantWildcardHost` Kubernetes-API **отбрасывает** поле
+`spec.match.kinds`, потому что сгенерированный CRD-шник от Gatekeeper **не
+знает** про это поле и включает строгую “схему с обрезкой” — вся неопределённая
+структура удаляется, прежде чем объект попадает в etcd.
+В Git поле остаётся, в кластере его уже нет ⇒ Argo CD видит diff и пишет
+*OutOfSync (requires pruning)*.
+Это типичная ситуация для Gatekeeper-Constraint’ов и CRD-ов
+со структурными схемами — см. обсуждения ([github.com][1], [github.com][2]).
+
+---
+
+## Почему API-server «порезал» объект
+
+| Шаг | Что происходит                                                                                               |
+| --- | ------------------------------------------------------------------------------------------------------------ |
+| 1   | Gatekeeper, увидев `ConstraintTemplate`, генерирует CRD с валидационной схемой.                              |
+| 2   | В нашем шаблоне мы задали схему **только для `spec.parameters`**, остальных полей (включая `match`) там нет. |
+| 3   | Для структурных CRD (K8s ≥1.22) API-server **обрезает все незадекларированные поля** ([kubernetes.io][3]).   |
+| 4   | В etcd сохраняется уже «укороченный» объект, и Argo CD фиксирует расхождение.                                |
+
+Gatekeeper раньше автоматически помечал корень `spec` флагом
+`x-kubernetes-preserve-unknown-fields: true`, но в ветках v3.9–v3.12 был баг,
+из-за которого эта аннотация исчезала — см. issue #1468 ([github.com][1]).
+
+---
+
+## Способы устранить OutOfSync
+
+### 1 . Расширить схему или разрешить произвольные поля
+
+#### Вариант A — включить «не обрезать»
+
+Добавьте флаг прямо в шаблон:
+
+```yaml
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sTenantWildcardHost
+      validation:
+        openAPIV3Schema:
+          type: object
+          x-kubernetes-preserve-unknown-fields: true   # ← ключевая строка
+          properties:
+            domainSuffixes:
+              type: array
+              items:
+                type: string
+```
+
+`x-kubernetes-preserve-unknown-fields: true` заставит API-server
+оставить любые незадекларированные данные ([kubernetes.io][4]).
+После обновления шаблона:
+
+```bash
+kubectl apply -f k8stenantwildcardhost-template.yaml
+kubectl wait --for=condition=Ready constrainttemplate/k8stenantwildcardhost
+argocd app sync …
+```
+
+Argo CD больше не увидит diff.
+
+#### Вариант B — задать схему для `match`
+
+Добавьте в `openAPIV3Schema.properties` отдельный блок:
+
+```yaml
+match:
+  type: object
+  x-kubernetes-preserve-unknown-fields: true
+```
+
+или опишите под-поля полностью (apiGroups, kinds и т. д.) — тогда
+содержимое сохранится, а при опечатке API-server будет ругаться на схему
+(это рекомендует сама документация Gatekeeper ([open-policy-agent.github.io][5])).
+
+### 2 . Сторона Argo CD — «игнорировать отличие»
+
+Если изменить CRD нельзя (например, управляет-ся чужим Helm-чартом), в манифест
+приложения Argo CD добавьте аннотацию или `ignoreDifferences` ([argo-cd.readthedocs.io][6]):
+
+```yaml
+metadata:
+  annotations:
+    argocd.argoproj.io/ignore-differences: |
+      jsonPointers:
+      - /spec/match
+```
+
+Argo будет считать расхождение незначительным и не ломать sync.
+
+### 3 . Обновиться на Gatekeeper ≥ v3.13
+
+Начиная с v3.13 команда Gatekeeper снова ставит
+`x-kubernetes-preserve-unknown-fields` по-умолчанию ([github.com][7]), поэтому
+проблема исчезает «из коробки». На Anthos это означает переход на канал
+1.23+ или самостоятельный Helm-деплойcommunity-версии Gatekeeper.
+
+---
+
+## Проверить, что всё исправлено
+
+```bash
+# live-объект должен содержать match
+kubectl get k8stenantwildcardhost tenant-wildcard-hosts -o yaml | yq '.spec.match'
+
+# Argo CD должен показать STATUS: Synced
+argocd app diff <app-name>   # → выходной код 0
+```
+
+Если обе проверки успешны, ваше приложение больше не будет уходить в `OutOfSync`.
+
+---
+
+### Главное
+
+*Argo CD показывает diff не из-за Helm-шаблонов,*
+а потому что **API-server «подрезал» неизвестные поля**,
+когда CRD-схема их не описала.
+Исправляется либо добавлением
+`x-kubernetes-preserve-unknown-fields: true`,
+либо полным описанием `match` в схеме,
+либо переносом «игнора» на сторону Argo CD.
+
+[1]: https://github.com/open-policy-agent/gatekeeper/issues/1468?utm_source=chatgpt.com "Parameters in constraints are deleted in v3.5.1 · Issue #1468 - GitHub"
+[2]: https://github.com/open-policy-agent/gatekeeper/issues/1818?utm_source=chatgpt.com "Evaluate impact of x-kubernetes-preserve-unknown-fields: true ..."
+[3]: https://kubernetes.io/blog/2019/06/20/crd-structural-schema/?utm_source=chatgpt.com "Future of CRDs: Structural Schemas - Kubernetes"
+[4]: https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/?utm_source=chatgpt.com "Extend the Kubernetes API with CustomResourceDefinitions"
+[5]: https://open-policy-agent.github.io/gatekeeper/website/docs/constrainttemplates/?utm_source=chatgpt.com "Constraint Templates | Gatekeeper - GitHub Pages"
+[6]: https://argo-cd.readthedocs.io/en/stable/user-guide/diffing/?utm_source=chatgpt.com "Diff Customization - Argo CD - Declarative GitOps CD for Kubernetes"
+[7]: https://github.com/open-policy-agent/gatekeeper/issues/3996?utm_source=chatgpt.com "spec.preserveUnknownFields has been deprecated in favor of x ..."
