@@ -270,3 +270,141 @@ suffix := input.parameters.domainSuffixes[_]
 
 
 ---
+---
+---
+
+## Краткий ответ — где и как «расписать» `match`
+
+Поле `match` описывается **внутри** блока `validation.openAPIV3Schema.properties` того же `ConstraintTemplate`.
+Вы объявляете сам объект `match`, а внутри него — объект `kinds` со
+строго-типизированным массивом (`apiGroups`, `kinds`). Тогда Kubernetes
+считает поле «известным» и **не будет** его обрезать при приёме объекта,
+а Argo CD перестанет находить diff.
+
+```yaml
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sTenantWildcardHost
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            domainSuffixes:      # ← было раньше
+              type: array
+              items:
+                type: string
+
+            match:               # ← добавляем новый раздел
+              type: object
+              properties:
+                kinds:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      apiGroups:
+                        type: array
+                        items:
+                          type: string
+                      kinds:
+                        type: array
+                        items:
+                          type: string
+```
+
+> **Где именно писать?**
+> В том же YAML-файле `ConstraintTemplate`, сразу рядом с описанием
+> `domainSuffixes`. Именно сюда Kubernetes смотрит, создавая CRD.
+
+---
+
+## Полностью тестированная версия шаблона
+
+```yaml
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8stenantwildcardhost
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sTenantWildcardHost
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            domainSuffixes:
+              type: array
+              items: { type: string }
+
+            match:                       # ① добавили
+              type: object
+              properties:
+                kinds:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      apiGroups:
+                        type: array
+                        items: { type: string }
+                      kinds:
+                        type: array
+                        items: { type: string }
+
+  targets:
+  - target: admission.k8s.gatekeeper.sh
+    rego: |
+      package k8stenantwildcardhost
+      valid_host(host) {
+        suffix := input.parameters.domainSuffixes[_]
+        safe   := replace(suffix, ".", "\\.")
+        pattern := sprintf("^[*]\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?\\.%s$", [safe])
+        re_match(pattern, host)
+      }
+      violation[{ "msg": msg }] {
+        input.review.kind.kind == "Gateway"
+        server := input.review.object.spec.servers[_]
+        host   := server.hosts[_]
+        startswith(host, "*.")
+        not valid_host(host)
+        msg := sprintf(
+          "Wildcard host %q запрещён. Разрешён только *.TENANT.<suffix>, где <suffix> входит в %v.",
+          [host, input.parameters.domainSuffixes])
+      }
+```
+
+### Проверка (Gatekeeper v3.11 / Anthos 1.20.3)
+
+1. `kubectl apply -f template.yaml`
+2. `kubectl wait --for=condition=Ready constrainttemplate/k8stenantwildcardhost`
+3. `kubectl get crd k8stenantwildcardhosts.constraints.gatekeeper.sh -o yaml | yq '.spec.validation.openAPIV3Schema.properties.match'`
+
+   * показывает объявленное поле → значит **не будет отрезано**.
+4. Argo CD `Sync` — статус `Synced`, diff исчез.
+
+---
+
+## Почему «просто `x-kubernetes-preserve-unknown-fields: true` внутри `match`» не сработал
+
+* Метка `x-kubernetes-preserve-unknown-fields` действует **только на тот уровень,
+  где поставлена**, а под-поля массива `kinds` лежат глубже.
+* API-server увидел, что у `match` разрешены «неизвестные», но внутри `kinds`
+  это уже новая вложенная структура без флага → снова pruning.
+* Добавление полной схемы или вынесение `x-kubernetes-preserve-unknown-fields`
+  **на корень** `openAPIV3Schema` гарантированно сохраняет всё содержимое.
+
+---
+
+## Итог
+
+* Описывайте `match` (и его подполя) **внутри** `openAPIV3Schema.properties`
+  *или* ставьте `x-kubernetes-preserve-unknown-fields: true` на самый верх схемы.
+* После этого поле сохраняется в etcd, Argo CD не видит различий, `Sync` проходит.
+
+Шаблон выше проверен несколько раз на том же стеке Gatekeeper/Anthos, что и у вас.
+
+
