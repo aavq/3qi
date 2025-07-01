@@ -223,4 +223,110 @@ argocd app get <app> | grep Status
 Если все три проверки проходят, проблема diff окончательно решена.
 
 
+---
+---
+---
+
+
+### Коротко
+
+Ошибка `strict decoding error: unknown field "match"` возникает, когда вы отправляете `K8sTenantWildcardHost`, а в **схеме CRD** этого поля нет. Kubernetes-API по-умолчанию «обрезает» (pruning) все неизвестные поля, а для уже сохранённых объектов он ещё и отклоняет запрос, если включена строгая декодировка ([github.com][1]).
+
+Причины, почему это до сих пор происходит, бывают две — и обе устраняются довольно быстро:
+
+| Возможная причина                                                                                                | Как выглядит                                              | Как починить                                                                  |
+| ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| **(A) Опечатка в apiVersion** – вместо `v1beta1` написано, например, `vibeta1`                                   | ошибка «unknown field …» при любой попытке создать объект | Проверьте шапку манифеста:<br>`apiVersion: constraints.gatekeeper.sh/v1beta1` |
+| **(B) CRD всё ещё не хранит `spec.match`** (вы пропатчили CRD, но сам объект-Constraint был создан **до** патча) | `kubectl get … -o yaml` → блока `.spec.match` нет         | Удалите старый Constraint и примените его заново → новый сохранится целиком   |
+
+---
+
+## 1.  Сначала убедитесь, что apiVersion верный
+
+```yaml
+apiVersion: constraints.gatekeeper.sh/v1beta1   # ← строго v1beta1
+kind: K8sTenantWildcardHost
+metadata:
+  name: tenant-wildcard-hosts
+spec:
+  match:
+    kinds:
+      - apiGroups: ["networking.istio.io"]
+        kinds:   ["Gateway"]
+  parameters:
+    domainSuffixes:
+      - asm-uk-01.uat.hc.intranet.corp.com
+```
+
+Опечатка в версии приводит к тому, что kubectl не может подобрать декодер и
+показывает именно такое сообщение об “unknown field” .
+
+---
+
+## 2.  Проверяем, видит ли CRD ваше поле
+
+```bash
+kubectl get crd k8stenantwildcardhosts.constraints.gatekeeper.sh \
+  -o jsonpath='{.spec.validation.openAPIV3Schema.x-kubernetes-preserve-unknown-fields}'
+```
+
+*Если вывод `true`* → флаг включён. Теперь нужно пересоздать объект-Constraint,
+чтобы он сохранился по новой схеме:
+
+```bash
+kubectl delete k8stenantwildcardhost tenant-wildcard-hosts
+kubectl apply  -f tenant-wildcard-hosts.yaml
+```
+
+Новый объект уже содержит `spec.match` (проверьте `kubectl get … -o yaml`),
+потому что теперь API-server не режет неизвестные поля при сохранении ([kubernetes.io][2]).
+
+---
+
+## 3.  Если флага нет — патч CRD ещё раз (точно под нужный путь)
+
+Для Gatekeeper ≤ v3.12 флаг нужно ставить именно **внутри свойства `spec`**
+схемы — иначе Kubernetes продолжит резать вложенные поля ([github.com][3]).
+
+```bash
+kubectl patch crd k8stenantwildcardhosts.constraints.gatekeeper.sh \
+  --type=merge \
+  -p='{"spec":{"validation":{"openAPIV3Schema":{"properties":{"spec":{"x-kubernetes-preserve-unknown-fields":true}}}}}}'
+```
+
+Проверьте снова (см. пункт 2) и пересоздайте Constraint.
+
+---
+
+## 4.  Почему пересоздание требуется
+
+* CRD-схема меняется **только для новых/обновлённых** объектов ([github.com][4]).
+* Старые записи уже лежат «усечёнными» в etcd; Argo CD сравнивает YAML из Git
+  (с `match`) с live-объектом (без `match`) и оставляет статус *OutOfSync* ([github.com][5]).
+* После пересоздания объект в etcd содержит полный набор полей, diff исчезает.
+
+---
+
+## 5.  Если нужен «раз и навсегда»
+
+* **Обновите Gatekeeper до ≥ v3.13** — новые версии сразу генерируют CRD с
+  глобальным `x-kubernetes-preserve-unknown-fields: true` .
+* Тогда не придётся патчить CRD, и Argo CD не будет ловить diff даже при новых
+  Constraint’ах.
+
+---
+
+### Главное
+
+1. Убедитесь, что в манифесте `apiVersion: …/v1beta1`.
+2. Проверьте, что в CRD включён флаг `x-kubernetes-preserve-unknown-fields`
+   (и при необходимости пропатчите именно `spec`).
+3. Пересоздайте сам Constraint — новый объект сохранится полностью,
+   Kubernetes перестанет ругаться на поле `match`, а Argo CD покажет **Synced**.
+
+[1]: https://github.com/kubernetes/kubernetes/issues/109215?utm_source=chatgpt.com "server-side field validation rejects metadata fields as unknown fields"
+[2]: https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/?utm_source=chatgpt.com "Extend the Kubernetes API with CustomResourceDefinitions"
+[3]: https://github.com/kubernetes/kubernetes/issues/111074?utm_source=chatgpt.com "Add ability to opt-out of pruning and perform server side validation"
+[4]: https://github.com/open-policy-agent/gatekeeper/issues/2863?utm_source=chatgpt.com "Gator doesn't validate that constraint resources are well formed #2863"
+[5]: https://github.com/argoproj/argo-cd/issues/9252?utm_source=chatgpt.com "Sync failed when deploy Gatekeeper ConstraintTemplate ... - GitHub"
 
