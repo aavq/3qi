@@ -75,3 +75,94 @@ kubectl get k8stenantwildcardhost <имя> -o yaml | yq '.spec.match'
 ```
 
 Теперь Argo CD больше не будет видеть diffs, и статус приложения станет **Synced**.
+
+
+---
+---
+---
+
+
+Никакой новой CRD создавать не нужно – она уже есть, вам нужно **пропатчить существующую**.
+Ошибка `unknown field "spec. validation"` появилась потому, что:
+
+1. вы отправили манифест как *«create»* (API-сервер пытается трактовать его как полноценную CRD, а не как patch);
+2. в YAML после `spec.` случайно попала пробельная строка, из-за чего key `validation` распознался неправильно.
+
+Ниже два надёжных способа внести флаг `x-kubernetes-preserve-unknown-fields: true` в уже-созданный CRD.
+
+---
+
+## Способ 1 — однократный patch через команду
+
+```bash
+kubectl patch crd k8stenantwildcardhosts.constraints.gatekeeper.sh \
+  --type='merge' \
+  -p='{"spec":{"validation":{"openAPIV3Schema":{"x-kubernetes-preserve-unknown-fields":true}}}}'
+```
+
+* тип **merge** – самый простой: он «смешивает» ваш JSON-фрагмент со
+  структурой объекта;
+* подтверждение увидите в поле `patched` → `true`;
+* после этого `kubectl get` покажет, что флаг установлен, а Argo CD
+  перестанет видеть diff.
+
+---
+
+## Способ 2 — declarative patch-файл + apply
+
+1. Создайте файл `crd-preserve-patch.yaml`:
+
+   ```yaml
+   apiVersion: apiextensions.k8s.io/v1
+   kind: CustomResourceDefinition
+   metadata:
+     name: k8stenantwildcardhosts.constraints.gatekeeper.sh
+   spec:
+     validation:
+       openAPIV3Schema:
+         x-kubernetes-preserve-unknown-fields: true
+   ```
+
+2. Примените **apply**, а не create:
+
+   ```bash
+   kubectl apply -f crd-preserve-patch.yaml
+   ```
+
+   `kubectl` распознает, что объект уже существует, и выполнит
+   стратегический merge.
+
+> Важно: убедитесь, что в файле *нет* пробелов между `spec.` и `validation`
+> (должно быть именно `spec:`, затем следующий уровень `validation:`).
+
+---
+
+## Проверка
+
+```bash
+# Флаг должен быть true
+kubectl get crd k8stenantwildcardhosts.constraints.gatekeeper.sh \
+  -o jsonpath='{.spec.validation.openAPIV3Schema.x-kubernetes-preserve-unknown-fields}'
+
+# Блок match теперь хранится
+kubectl get k8stenantwildcardhost tenant-wildcard-hosts -o yaml | yq '.spec.match'
+```
+
+Если оба вывода корректные, Argo CD после следующего `Sync / Refresh`
+отобразит приложение как **Synced**.
+
+---
+
+### Почему не сработал предыдущий вариант «добавить в Template»
+
+Gatekeeper копирует из `ConstraintTemplate` только под-раздел
+`spec.parameters`, всё остальное (включая ваш `match`) в итоговый CRD не
+попадает. Поэтому единственный путь на Gatekeeper ≤ v3.12 – править сам CRD
+(описано выше) либо обновиться до Gatekeeper v3.13+, где флаг ставится
+автоматически.
+
+
+---
+---
+---
+
