@@ -112,3 +112,121 @@
 [22]: https://www.thegooddocsproject.dev/template/code-of-conduct-incident-record "www.thegooddocsproject.dev"
 [23]: https://www.thegooddocsproject.dev/template/code-of-conduct-remediation-record "www.thegooddocsproject.dev"
 [24]: https://www.thegooddocsproject.dev/template/user-personas "www.thegooddocsproject.dev"
+
+
+
+
+---
+---
+---
+
+За основу «универсального» каркаса можно взять пересечение требований стандартов ISO 82079-1 (информация для использования), ISO / IEC / IEEE 26515 (док-процесс), правил контроля документации ISO 9001 и практик Diátaxis / The Good Docs Project. Эти источники сходятся в том, что любой тех-документ — от архитектурного решения до how-to — должен давать читателю *ответы на одни и те же базовые вопросы*: что это, для кого, при каких условиях применять, как убедиться в результате и как отследить изменения. ([instrktiv.com][1], [cdn.standards.iteh.ai][2], [diataxis.fr][3], [thegooddocsproject.dev][4], [blog.invgate.com][5], [qualitysystems.com][6])
+
+## Набор обязательных разделов
+
+> Ниже перечислены секции, которые стоит делать **обязательными** для любого технического документа. Формулировки можно адаптировать к формату (MD-файл, Confluence-страница, PDF), но сами данные должны присутствовать всегда.
+
+| #  | Раздел                                                           | Цель / ключевые вопросы                                                                                                |
+| -- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 1  | **Title & Metadata** (ID, версия, дата, статус, автор, владельц) | Однозначно идентифицирует документ и его актуальность. Требуется ISO 9001 для «идентификации и описания».              |
+| 2  | **Purpose / Overview**                                           | Что за проблему решает документ? Какую пользу несёт читателю?                                                          |
+| 3  | **Audience & Scope**                                             | Для кого написано, какой уровень знаний предполагается и какие границы охватывает материал.                            |
+| 4  | **Context / Background**                                         | Краткая предыстория, архитектурные предпосылки или бизнес-требования, необходимые для понимания основной части.        |
+| 5  | **Prerequisites / Before you start**                             | Технические и организационные условия, права доступа, версии ПО, ограничения.                                          |
+| 6  | **Main Content**                                                 | Собственно дизайн, процедура или инструкция — структура зависит от типа документа (диаграммы, numbered steps и т. д.). |
+| 7  | **Expected Results / Acceptance**                                | Как выглядит успешный исход: критерии приёмки, коды ответа, метрики.                                                   |
+| 8  | **Validation / Test**                                            | Шаги или ссылки на тест-кейсы, которыми можно подтвердить работоспособность решения.                                   |
+| 9  | **Next Steps / Post-conditions**                                 | Что делать после выполнения процедуры: очистка среды, развёртывание в прод, плановое обслуживание.                     |
+| 10 | **Related Docs & References**                                    | Ссылки на API-справку, концепты, RFC, дефект-лист. Держит читателя в едином инфопространстве.                          |
+| 11 | **Glossary / Acronyms**                                          | Определения терминов, чтобы исключить неоднозначность (особенно полезно для разноязычных команд).                      |
+| 12 | **Change Log / Revision History**                                | Сводка всех изменений с номерами версий и кратким описанием.                                                           |
+| 13 | **Review & Approval Record**                                     | Кто, когда и с каким результатом проверил документ (peer, SME, compliance), плюс дата следующего планового ревью.      |
+| 14 | **Ownership & Contact**                                          | Как связаться с автором или ответственным за сопровождение.                                                            |
+| 15 | **License / Compliance**                                         | Условия использования кода, схем, данных; соответствие нормативам или внутренним политикам.                            |
+
+Эти пятнадцать пунктов покрывают весь жизненный цикл информации: создание → применение → проверка → поддержка. ([atlassian.com][7], [graphapp.ai][8], [dmeg.cessda.eu][9])
+
+### Почему именно они?
+
+* **Metadata + Change Log** позволяют аудиторам и коллегам мгновенно понять, «правильную» ли версию они читают. ISO 9001 прямо требует контроля ревизий. ([qualitysystems.com][6])
+* **Audience, Scope, Context** снимают главный риск неправильного использования: стандарт 82079 подчёркивает, что информация должна быть «для целевой аудитории». ([instrktiv.com][1])
+* **Prerequisites** экономят время: ISO 26515 советует фиксировать все «assumptions and dependencies», чтобы команда Agile не спотыкалась на полпути. ([cdn.standards.iteh.ai][2])
+* **Expected Results + Validation** — способ «закрыть» Definition of Done и убрать споры о качестве. Atlassian в шаблоне SDD отдельно выделяет «assumptions, dependencies, acceptance». ([atlassian.com][7])
+* **Related Docs, Glossary** поддерживают связность контента (Diátaxis: «документы должны находиться друг через друга»). ([diataxis.fr][3])
+* **Review Record** отделяет «утверждение» от «рецензирования» и пригодится при внешних проверках (GDPR, SOX). Практику подтверждают The Good Docs и InvGate. ([thegooddocsproject.dev][4], [blog.invgate.com][5])
+
+### Как внедрить
+
+1. **Создайте шаблон-фронтматтер** (YAML/JSON) с полями из пунктов 1, 12-15; он будет автоматически заполняться через CI.
+2. **Добавьте секции 2-11 в тело** — порядок можно менять, но заголовки держите стабильными, чтобы поисковый движок Confluence или Docs-Site корректно строил ToC.
+3. **CI-проверка**: линтер проверяет наличие всех обязательных секций перед merge.
+4. **Нотация**: используйте одинаковые якоря (`## Purpose`, `## Prerequisites`) — это облегчает генерацию навигации и экспорт в PDF.
+
+### Пример минимального каркаса (Markdown)
+
+```markdown
+---
+title: "Title of the Document"
+doc-id: SYS-ARCH-042
+version: "1.2.0"
+status: Approved
+author: L. Ivanov
+owner: platform-team@example.com
+created: 2025-07-02
+updated: 2025-07-15
+next-review: 2026-07-15
+license: CC-BY-SA-4.0
+---
+
+## Purpose / Overview
+...
+
+## Audience & Scope
+...
+
+## Context / Background
+...
+
+## Prerequisites
+...
+
+## Main Content
+...
+
+## Expected Results
+...
+
+## Validation / Test
+...
+
+## Next Steps
+...
+
+## Related Docs & References
+...
+
+## Glossary
+...
+
+## Change Log
+| Version | Date | Author | Summary |
+|---------|------|--------|---------|
+| 1.2.0 | 2025-07-15 | L. Ivanov | Added validation section |
+
+## Review & Approval Record
+| Version | Reviewer | Date | Outcome |
+|---------|----------|------|---------|
+| 1.2.0 | Q. Chen | 2025-07-16 | Approved |
+```
+
+Следуя этому перечню, вы получите единообразную рамку, пригодную и для архитектурных томов, и для кратких инструкций, и для пользовательских руководств — без потери специфики каждого жанра.
+
+[1]: https://instrktiv.com/en/82079/ "Definitive Guide to EN 82079 on Creating Information For Use"
+[2]: https://cdn.standards.iteh.ai/samples/70880/1d67e3a097bf410a9a4ce292aa8b0c8b/ISO-IEC-IEEE-26515-2018.pdf "ISO/IEC/IEEE 26515:2018 - ISO/IEC/IEEE 26515:2018"
+[3]: https://diataxis.fr/ "Diátaxis"
+[4]: https://www.thegooddocsproject.dev/template "The Good Docs Project Template Guides"
+[5]: https://blog.invgate.com/technical-documentation "Technical Documentation: Best Practices, Formats, And Examples"
+[6]: https://www.qualitysystems.com/blog/revision-number-revision-date-or-both/ "Quality Systems - Revision Number, Revision Date or Both?"
+[7]: https://www.atlassian.com/work-management/knowledge-sharing/documentation/software-design-document " Software Design Document [Tips & Best Practices] | The Workstream "
+[8]: https://www.graphapp.ai/blog/the-ultimate-technical-documentation-template-a-comprehensive-guide "The Ultimate Technical Documentation Template: A Comprehensive Guide | Graph AI"
+[9]: https://dmeg.cessda.eu/Data-Management-Expert-Guide/2.-Organise-Document/Documentation-and-metadata "Documentation and metadata - Data Management Expert Guide"
