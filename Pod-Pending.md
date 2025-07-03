@@ -172,3 +172,103 @@ kubectl get events --sort-by=.lastTimestamp
 [11]: https://kubernetes.io/docs/concepts/storage/persistent-volumes/?utm_source=chatgpt.com "Persistent Volumes - Kubernetes"
 [12]: https://www.gremlin.com/blog/how-to-fix-kubernetes-unschedulable-pods?utm_source=chatgpt.com "How to troubleshoot unschedulable Pods in Kubernetes - Gremlin"
 [13]: https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/ "Pod Priority and Preemption | Kubernetes"
+
+
+
+---
+---
+---
+
+### Почему текущие tolerations не помогают
+
+| Уже прописан                                        | Что «покрывает»                               | Относится ли к ошибке |
+| --------------------------------------------------- | --------------------------------------------- | --------------------- |
+| `node.kubernetes.io/not-ready` (NoExecute, 300 s)   | кратковременная недоступность узла            | **нет**               |
+| `node.kubernetes.io/unreachable` (NoExecute, 300 s) | потеря сетевого соединения с узлом            | **нет**               |
+| `node.kubernetes.io/memory-pressure` (NoSchedule)   | когда kubelet пометил узел из-за нехватки RAM | **нет**               |
+
+Эти tolerations ― «стандартные» и добавляются почти в каждый манифест оператором/чартом, чтобы Pod не убивался при кратком сбое узла.
+**Они не относятся к taint’ам, которые блокируют размещение вашего Pod’а**:
+
+* `dedicated-node=clickhouse:NoSchedule`
+* `marketdata-test=true:NoSchedule`
+* `node-role.kubernetes.io/control-plane:NoSchedule`
+* (плюс один узел вообще `Unschedulable`, и у 19-ти узлов конфликт node affinity тома)
+
+Пока Pod *не* «терпит» первые три taint’а, планировщик даже не станет проверять ресурсы и preemption. ([kubernetes.io][1], [kubernetes.io][2])
+
+---
+
+## Что надо добавить
+
+### 1. Tolerations под реальные taint’ы
+
+```yaml
+spec:
+  tolerations:
+  # ─┐  ключ и значение должны в точности совпасть с taint’ом узла
+  #   ▼
+  - key: "dedicated-node"
+    operator: "Equal"
+    value: "clickhouse"
+    effect: "NoSchedule"
+  - key: "marketdata-test"
+    operator: "Equal"
+    value: "true"
+    effect: "NoSchedule"
+
+  # Разрешать или нет работу на control-plane
+  # Лучше - нет; если очень нужно –- раскомментируйте:
+  #- key: "node-role.kubernetes.io/control-plane"
+  #  effect: "NoSchedule"
+```
+
+> **Важно:** toleration *разрешает* планировщику игнорировать taint, но не заставляет Pod идти именно на эти узлы.
+> Если вы хотите, чтобы Pod размещался *только* на «clickhouse»-нодах, добавьте ещё и `nodeSelector` / `nodeAffinity` с той же меткой.
+
+### 2. Разобраться с `volume node affinity conflict`
+
+Пока даже с правильными toleration’ами Pod не сядет из-за PV-конфликта на 19-ти узлах. Чаще всего:
+
+1. **PV уже существует** и в `.spec.nodeAffinity` или `.spec.topology.kubernetes.io/zone` привязан к другой зоне.
+2. `StorageClass.volumeBindingMode` = `Immediate`, и диск создан до выбора узла.
+
+Пути решения:
+
+* переключить StorageClass на `WaitForFirstConsumer` → PV создастся в той зоне, где Scheduler выберет узел;
+* пересоздать PVC/PV вручную в нужной зоне;
+* поставить Pod’у `nodeSelector` в ту же зону, что и диск. ([discuss.kubernetes.io][3])
+
+---
+
+## Быстрый чек-лист
+
+```bash
+# 1. Посмотреть все taint’ы
+kubectl get nodes -o custom-columns=NAME:.metadata.name,TAINTS:.spec.taints
+
+# 2. Убедиться, что в Pod’е появились новые tolerations
+kubectl get pod <pod> -o jsonpath='{.spec.tolerations}'
+
+# 3. Проверить PV/PVC и зону
+kubectl describe pvc <name>
+kubectl describe pv  <name>
+
+# 4. Если надо, вернуть узел в строй
+kubectl uncordon <node>
+```
+
+---
+
+## Итог
+
+1. **Добавьте toleration’ы, совпадающие с taint’ами (`dedicated-node=clickhouse`, `marketdata-test=true`).**
+2. **Решите вопрос с PV:** или `WaitForFirstConsumer`, или пересоздать том/узел в одной зоне.
+3. Перезапустите Pod (`kubectl delete pod …`) — после этого он должен перейти в `Running`.
+
+Без шагов 1-2 планировщик продолжит объяснять: *«0/28 nodes are available … preemption is not helpful»*.
+
+[1]: https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/?utm_source=chatgpt.com "Taints and Tolerations | Kubernetes"
+[2]: https://kubernetes.io/docs/reference/labels-annotations-taints/?utm_source=chatgpt.com "Well-Known Labels, Annotations and Taints - Kubernetes"
+[3]: https://discuss.kubernetes.io/t/how-to-fix-this-error-2-node-s-had-volume-node-affinity-conflict/26936?utm_source=chatgpt.com "How to fix this error -- \"2 node(s) had volume node affinity conflict.\""
+
