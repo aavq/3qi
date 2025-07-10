@@ -130,3 +130,161 @@ kubectl logs deploy/kiali -n kiali --since=2m | grep -i "is forbidden" || echo "
 * Ошибки `cannot list resource … is forbidden` — это недостаточные RBAC.
 * Gatekeeper больше не мешает; надо **дописать** отсутствующие ресурсы в `ClusterRole`.
 * После добавления (`workloadgroups`, `telemetries`, `wasmplugins`, `httproutes`, `grpcroutes`, `referencegrants`) ошибки уходят, Kiali снова строит граф и метрики.
+
+
+***
+***
+***
+
+
+Ниже — «расширенная» **ClusterRole `kiali-viewer` без единого wildcard**, в которую включены **все объекты**, которые Kiali может читать в современном Kubernetes + Istio (≥ 1.20) и Gateway-API (v1beta1).
+Она проходит Constraint **policy-essentials-v2022-prohibit-role-wildcard-access**, потому что в каждом правиле перечислены ресурсы явно.
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kiali-viewer
+  labels:
+    app: kiali
+rules:
+# ------------------------------------------------------------------------------
+# 1) Kubernetes «core» API (глобально и по-неймспейсово)
+# ------------------------------------------------------------------------------
+- apiGroups: [""]
+  resources:
+    - namespaces
+    - nodes
+    - services
+    - endpoints
+    - pods
+    - pods/log
+    - pods/portforward
+    - replicationcontrollers
+    - configmaps
+    - events
+  verbs: ["get", "list", "watch"]
+
+# ------------------------------------------------------------------------------
+# 2) Workloads
+# ------------------------------------------------------------------------------
+- apiGroups: ["apps"]
+  resources:
+    - deployments
+    - replicasets
+    - daemonsets
+    - statefulsets
+  verbs: ["get", "list", "watch"]
+
+- apiGroups: ["batch"]
+  resources:
+    - jobs
+    - cronjobs
+  verbs: ["get", "list", "watch"]
+
+- apiGroups: ["autoscaling"]
+  resources:
+    - horizontalpodautoscalers
+  verbs: ["get", "list", "watch"]
+
+# ------------------------------------------------------------------------------
+# 3) Istio — networking.k8s.io
+# ------------------------------------------------------------------------------
+- apiGroups: ["networking.istio.io"]
+  resources:
+    - virtualservices
+    - destinationrules
+    - serviceentries
+    - gateways
+    - sidecars
+    - envoyfilters
+    - workloadentries
+    - workloadgroups
+    - proxyconfigs           # >= 1.21
+  verbs: ["get", "list", "watch"]
+
+# 4) Istio — security.istio.io
+- apiGroups: ["security.istio.io"]
+  resources:
+    - authorizationpolicies
+    - peerauthentications
+    - requestauthentications
+  verbs: ["get", "list", "watch"]
+
+# 5) Istio — telemetry.istio.io
+- apiGroups: ["telemetry.istio.io"]
+  resources:
+    - telemetries
+  verbs: ["get", "list", "watch"]
+
+# 6) Istio — extensions.istio.io  (Wasm-фильтры)
+- apiGroups: ["extensions.istio.io"]
+  resources:
+    - wasmplugins
+  verbs: ["get", "list", "watch"]
+
+# ------------------------------------------------------------------------------
+# 7) Gateway API (v1beta1)
+# ------------------------------------------------------------------------------
+- apiGroups: ["gateway.networking.k8s.io"]
+  resources:
+    - gatewayclasses
+    - gateways
+    - httproutes
+    - tcproutes
+    - tlsroutes
+    - udproutes
+    - grpcroutes
+    - referencegrants
+  verbs: ["get", "list", "watch"]
+
+# ------------------------------------------------------------------------------
+# 8) Собственные CRD Kiali (дешборды) — чтобы UI не ругался
+# ------------------------------------------------------------------------------
+- apiGroups: ["monitoring.kiali.io"]
+  resources:
+    - monitoringdashboards
+  verbs: ["get", "list", "watch"]
+```
+
+---
+
+### Как применять
+
+1. **Добавьте** YAML в ваш Git-репозиторий, чтобы Argo CD/Helm применяли его *после* чарта Kiali-operator (он всё равно создаст «пустую» роль — ваш файл её перезапишет).
+2. Убедитесь, что сервис-аккаунт пода Kiali остаётся тем же (`kiali:kiali`) — роль уже привязана через `ClusterRoleBinding kiali`.
+3. Проверка:
+
+   ```bash
+   kubectl rollout restart deploy/kiali -n kiali
+   kubectl logs -n kiali deploy/kiali --since=2m | grep -i "is forbidden" || echo "RBAC-ошибок нет 👍"
+   ```
+
+---
+
+### Обновление при новых версиях Istio / Gateway-API
+
+* Когда появляются новые CRD (например, `tcpRoute` → `tlsRoutes` в Gateway-API, `meshtraffics` в будущих релизах Istio), просто:
+
+  1. посмотрите, на что жалуется лог Kiali (`cannot list resource … is forbidden`);
+  2. добавьте эти ресурсы в соответствующее правило и сделайте `git commit` — Gatekeeper не будет против, пока wildcard’ов нет.
+
+---
+
+### Почему не оставили wildcard?
+
+Constraint **`policy-essentials-v2022-prohibit-role-wildcard-access`** запрещает
+
+```yaml
+resources: ["*"]
+```
+
+в любых ClusterRole/Role.
+Перечисляя ресурсы явно, мы:
+
+* соблюдаем требование политики,
+* сохраняем весь «read-only» функционал Kiali,
+* минимально открываем доступ (только `get/list/watch`, без `create`/`update`/`delete`).
+
+Эта роль подходит для production-кластеров, где RBAC должен быть строгим, а Gatekeeper — включённым.
+
