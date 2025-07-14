@@ -80,8 +80,8 @@ Identify **systems of record (databases, object storage), replication-topology, 
 
 | Category           | Metric         | Goal         |
 | ------------------ | -------------- | ------------ |
-| Performance        | p95 latency    | ≤ 150 ms     |
-| Security           | GDPR-compliant | Да           |
+| Performance        | p95 latency    | =< 150 ms    |
+| Security           | GDPR-compliant | Yes          |
 | Availability       | SLO 99.9 %     | 43 min/month |
 
 The matrix simplifies the verification of compliance with ISO 27001 and other standards
@@ -112,7 +112,7 @@ Detail **horizontal/vertical autoscaling rules, resource limits/requests, repres
 
 ## 11. Observability & Operations
 
-Specify **exported metrics, structured logs, traces, alert rules, dashboards, runbooks, and on-call escalation paths**—the "single pane of glass" for SREs.
+Specify **exported metrics, structured logs, traces, alert rules, dashboards, runbooks, and on-call escalation paths**-the "single pane of glass" for SREs.
 
 Clearly separate Metrics, Logs, Traces (MELT)
 
@@ -124,7 +124,7 @@ This makes SRE's life easier and specifies the error budget policy.
 
 ## 12. Configuration & Runtime Environment
 
-Apply **Twelve-Factor principles—config via environment variables, immutable container images, and strict separation of code and state**.
+Apply **Twelve-Factor principles-config via environment variables, immutable container images, and strict separation of code and state**.
 
 ## 13. Release, Deployment, Migration & Rollback Strategy
 
