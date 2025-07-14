@@ -51,7 +51,9 @@ For every component list **responsibility, inputs/outputs, Kubernetes resource t
 
 Diagram **on-prem Anthos clusters (bare-metal), regional GKE clusters, fleet membership, failure-domains, Cloud Network and DNS strategy**.
 
-## 6. Interfaces & Integrations
+## 6. Dependencies, Interfaces, Integrations & Third-Party Services
+
+Record **base-image versions, operators/CRDs, external APIs, and the SLOs you rely on** so downstream risks are visible during reviews.
 
 Catalog **north-/south-bound APIs, ingress controllers, service meshes, external SaaS, and event buses**, noting protocol (gRPC, REST), versioning, and backward-compatibility rules.
 
@@ -83,13 +85,7 @@ Specify **exported metrics, structured logs, traces, alert rules, dashboards, ru
 
 Apply **Twelve-Factor principles—config via environment variables, immutable container images, and strict separation of code and state**.
 
-## 13. Dependencies, Interfaces & Third-Party Services
-
-*Ingress/egress, APIs, third-party integrations (LDAP, CMDB, GitOps repos, etc.).*
-
-Record **base-image versions, operators/CRDs, external APIs, and the SLOs you rely on** so downstream risks are visible during reviews.
-
-## 14. Release, Deployment, Migration & Rollback Strategy
+## 13. Release, Deployment, Migration & Rollback Strategy
 
 Describe **CI/CD pipeline stages, blue-green or canary deployment patterns, schema-migration workflows, and the phased retirement plan for legacy versions**.
 
@@ -97,33 +93,33 @@ Describe **CI/CD pipeline stages, blue-green or canary deployment patterns, sche
 
 **Operations** *Patch management, inventory, audit, report distribution.*
 
-## 15. Constraints, Assumptions & Risk Mitigation
+## 14. Constraints, Assumptions & Risk Mitigation
 
 List **technical or organisational constraints, key assumptions, identified risks (e.g., single-region storage), and mitigation tactics**.
 
-## 16. Cost & Capacity Planning
+## 15. Cost & Capacity Planning
 
 Show **GCP usage projections, on-prem licence and Hardware & Operating System costs, and the budget for SRE coverage** to keep finance teams in the loop.
 
 *Server models, CPU/RAM, OS (e.g., RHEL 9).*
 
-## 17. Architectural Decisions & Alternatives (ADRs)
+## 16. Architectural Decisions & Alternatives (ADRs)
 
 Log **every significant design decision with date, author, context, and the alternatives rejected**, making later audits and reversals straightforward.
 
-## 18. User Interfaces
+## 17. User Interfaces
 
 *CLI (kubectl), Web UI (ArgoCD, Backstage portal, Kubernetes Dashboard).*
 
-## 19. Fault Management
+## 18. Fault Management
 
 Failure modes, alerting, auto-healing, runbooks; include etcd snapshot/restore procedures per Kubernetes DR docs
 
-## 20. Testing
+## 19. Testing
 
 Unit, integration, performance
 
-## 21. References, Glossary & Appendices
+## 20. References, Glossary & Appendices
 
 Provide **source documents, a glossary of Anthos terms (GKE Hub, Fleet, ASM, etc.), and any oversized diagrams or code samples** that would otherwise clutter the main text.
 
