@@ -10,6 +10,10 @@ Below is design-documentation template. This template unifies proven SDD convent
 
 ## Executive Summary
 
+* **Business price**
+* **Key risks**
+* **C4-1 level diagram**
+
 ## System Overview
 
 *Capture basic System identity and ownership.*
