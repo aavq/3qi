@@ -67,11 +67,21 @@ Catalog **north-/south-bound APIs, ingress controllers, service meshes, external
 
 Identify **systems of record (databases, object storage), replication-topology, backup plan, StorageClasses, RPO/RTO targets, and data lineage requirements**.
 
-## 8. Security & Compliance
+## 8. Summary table of non-functional Requirements (NFR)
+
+| Category           | Metric         | Goal         |
+| ------------------ | -------------- | ------------ |
+| Performance        | p95 latency    | ≤ 150 ms     |
+| Security           | GDPR-compliant | Да           |
+| Availability       | SLO 99.9 %     | 43 min/month |
+
+The matrix simplifies the verification of compliance with ISO 27001 and other standards
+
+## 9. Security & Compliance
 
 Cover **authentication/authorization (Workload Identity, RBAC), network policies, encryption at-rest/in-transit, secret management, and regulatory standards (ISO 27001, GDPR, etc.)**.
 
-## 9. Scalability, Reliability, Performance & Resilience
+## 10. Scalability, Reliability, Performance & Resilience
 
 Declare **SLIs/SLOs, error-budget policy, quorum or consensus strategy, multi-cluster fail-over design, and the incident-command process used during outages**.
 
@@ -81,15 +91,15 @@ Declare **SLIs/SLOs, error-budget policy, quorum or consensus strategy, multi-cl
 
 Detail **horizontal/vertical autoscaling rules, resource limits/requests, representative load profiles, and benchmark results** so teams can size environments correctly.
 
-## 10. Observability & Operations
+## 11. Observability & Operations
 
 Specify **exported metrics, structured logs, traces, alert rules, dashboards, runbooks, and on-call escalation paths**—the "single pane of glass" for SREs.
 
-## 11. Configuration & Runtime Environment
+## 12. Configuration & Runtime Environment
 
 Apply **Twelve-Factor principles—config via environment variables, immutable container images, and strict separation of code and state**.
 
-## 12. Release, Deployment, Migration & Rollback Strategy
+## 13. Release, Deployment, Migration & Rollback Strategy
 
 Describe **CI/CD pipeline stages, blue-green or canary deployment patterns, schema-migration workflows, and the phased retirement plan for legacy versions**.
 
@@ -97,17 +107,17 @@ Describe **CI/CD pipeline stages, blue-green or canary deployment patterns, sche
 
 **Operations** *Patch management, inventory, audit, report distribution.*
 
-## 13. Constraints, Assumptions & Risk Mitigation
+## 14. Constraints, Assumptions & Risk Mitigation
 
 List **technical or organisational constraints, key assumptions, identified risks (e.g., single-region storage), and mitigation tactics**.
 
-## 14. Cost & Capacity Planning
+## 15. Cost & Capacity Planning
 
 Show **GCP usage projections, on-prem licence and Hardware & Operating System costs, and the budget for SRE coverage** to keep finance teams in the loop.
 
 *Server models, CPU/RAM, OS (e.g., RHEL 9).*
 
-## 15. Architectural Decisions & Alternatives (ADRs)
+## 16. Architectural Decisions & Alternatives (ADRs)
 
 **Implement** the ADR log using the Michael Nygard template: [github.com/joelparkerhenderson/architecture-decision-record](https://github.com/joelparkerhenderson/architecture-decision-record)
 
@@ -117,19 +127,19 @@ Refer to the relevant ADR
 
 Log **every significant design decision with date, author, context, and the alternatives rejected**, making later audits and reversals straightforward.
 
-## 16. User Interfaces
+## 17. User Interfaces
 
 *CLI (kubectl), Web UI (ArgoCD, Backstage portal, Kubernetes Dashboard).*
 
-## 17. Fault Management
+## 18. Fault Management
 
 Failure modes, alerting, auto-healing, runbooks; include etcd snapshot/restore procedures per Kubernetes DR docs
 
-## 18. Testing
+## 19. Testing
 
 Unit, integration, performance
 
-## 19. References, Glossary & Appendices
+## 20. References, Glossary & Appendices
 
 Provide **source documents, a glossary of Anthos terms (GKE Hub, Fleet, ASM, etc.), and any oversized diagrams or code samples** that would otherwise clutter the main text.
 
