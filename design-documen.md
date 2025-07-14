@@ -106,6 +106,17 @@ Add the **STRIDE / DREAD**:
 
 The approach is supported in the Kubernetes Security Whitepaper. This reduces audit time.
 
+**Supply-Chain Security**
+
+Document how the project produces a Software Bill of Materials (SBOM) for every image and what SLSA level your pipeline claims.
+Cite the tool (e.g., Syft + Grype) and storage location of signed attestations. SBOMs and SLSA are now baseline requirements for many audits. 
+
+**Content checklist**:
+ * SBOM generation stage in CI
+ * Provenance attestations (link to .intoto.jsonl file)
+ * Minimum accepted SLSA level (e.g., Build L3)
+ * Dependency-update policy (Renovate, Dependabot)
+
 ## 10. Scalability, Reliability, Performance & Resilience
 
 Declare **SLIs/SLOs, error-budget policy, quorum or consensus strategy, multi-cluster fail-over design, and the incident-command process used during outages**.
@@ -181,5 +192,6 @@ Describe the frequency and check of DR drills (at least once a quarter)
 ## 21. References, Glossary & Appendices
 
 Provide **source documents, a glossary of Anthos terms (GKE Hub, Fleet, ASM, etc.), and any oversized diagrams or code samples** that would otherwise clutter the main text.
+
 
 ---
