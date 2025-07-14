@@ -109,6 +109,8 @@ Show **GCP usage projections, on-prem licence and Hardware & Operating System co
 
 ## 15. Architectural Decisions & Alternatives (ADRs)
 
+[github.com/joelparkerhenderson/architecture-decision-record](https://github.com/joelparkerhenderson/architecture-decision-record)
+
 Log **every significant design decision with date, author, context, and the alternatives rejected**, making later audits and reversals straightforward.
 
 ## 16. User Interfaces
