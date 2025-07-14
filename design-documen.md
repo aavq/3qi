@@ -109,7 +109,11 @@ Show **GCP usage projections, on-prem licence and Hardware & Operating System co
 
 ## 15. Architectural Decisions & Alternatives (ADRs)
 
-[github.com/joelparkerhenderson/architecture-decision-record](https://github.com/joelparkerhenderson/architecture-decision-record)
+**Implement** the ADR log using the Michael Nygard template: [github.com/joelparkerhenderson/architecture-decision-record](https://github.com/joelparkerhenderson/architecture-decision-record)
+
+Keep ADR files next to the code (/docs/adr/<ID>-title.md)
+
+Refer to the relevant ADR
 
 Log **every significant design decision with date, author, context, and the alternatives rejected**, making later audits and reversals straightforward.
 
