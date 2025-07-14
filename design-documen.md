@@ -65,27 +65,25 @@ Identify **systems of record (databases, object storage), replication-topology, 
 
 Cover **authentication/authorization (Workload Identity, RBAC), network policies, encryption at-rest/in-transit, secret management, and regulatory standards (ISO 27001, GDPR, etc.)**.
 
-## 9. Reliability & Resilience
+## 9. Scalability, Reliability, Performance & Resilience
 
 Declare **SLIs/SLOs, error-budget policy, quorum or consensus strategy, multi-cluster fail-over design, and the incident-command process used during outages**.
 
-**Disaster Recovery** *RPO/RTO, quarterly DR drills, etcd snapshot frequency.*
+*Target SLA/SLO, capacity headroom.*
 
-## 10. Scalability, Reliability & Performance
+**Disaster Recovery** *RPO/RTO, quarterly DR drills, etcd snapshot frequency.*
 
 Detail **horizontal/vertical autoscaling rules, resource limits/requests, representative load profiles, and benchmark results** so teams can size environments correctly.
 
-*Target SLA/SLO, capacity headroom.*
-
-## 11. Observability & Operations
+## 10. Observability & Operations
 
 Specify **exported metrics, structured logs, traces, alert rules, dashboards, runbooks, and on-call escalation paths**—the "single pane of glass" for SREs.
 
-## 12. Configuration & Runtime Environment
+## 11. Configuration & Runtime Environment
 
 Apply **Twelve-Factor principles—config via environment variables, immutable container images, and strict separation of code and state**.
 
-## 13. Release, Deployment, Migration & Rollback Strategy
+## 12. Release, Deployment, Migration & Rollback Strategy
 
 Describe **CI/CD pipeline stages, blue-green or canary deployment patterns, schema-migration workflows, and the phased retirement plan for legacy versions**.
 
@@ -93,33 +91,33 @@ Describe **CI/CD pipeline stages, blue-green or canary deployment patterns, sche
 
 **Operations** *Patch management, inventory, audit, report distribution.*
 
-## 14. Constraints, Assumptions & Risk Mitigation
+## 13. Constraints, Assumptions & Risk Mitigation
 
 List **technical or organisational constraints, key assumptions, identified risks (e.g., single-region storage), and mitigation tactics**.
 
-## 15. Cost & Capacity Planning
+## 14. Cost & Capacity Planning
 
 Show **GCP usage projections, on-prem licence and Hardware & Operating System costs, and the budget for SRE coverage** to keep finance teams in the loop.
 
 *Server models, CPU/RAM, OS (e.g., RHEL 9).*
 
-## 16. Architectural Decisions & Alternatives (ADRs)
+## 15. Architectural Decisions & Alternatives (ADRs)
 
 Log **every significant design decision with date, author, context, and the alternatives rejected**, making later audits and reversals straightforward.
 
-## 17. User Interfaces
+## 16. User Interfaces
 
 *CLI (kubectl), Web UI (ArgoCD, Backstage portal, Kubernetes Dashboard).*
 
-## 18. Fault Management
+## 17. Fault Management
 
 Failure modes, alerting, auto-healing, runbooks; include etcd snapshot/restore procedures per Kubernetes DR docs
 
-## 19. Testing
+## 18. Testing
 
 Unit, integration, performance
 
-## 20. References, Glossary & Appendices
+## 19. References, Glossary & Appendices
 
 Provide **source documents, a glossary of Anthos terms (GKE Hub, Fleet, ASM, etc.), and any oversized diagrams or code samples** that would otherwise clutter the main text.
 
