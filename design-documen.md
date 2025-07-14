@@ -172,7 +172,7 @@ Add a clear recovery process. For example etcdutl, snapshot, restore for all nod
 
 Describe the frequency and check of DR drills (at least once a quarter)
 
-## 20. References, Glossary & Appendices
+## 21. References, Glossary & Appendices
 
 Provide **source documents, a glossary of Anthos terms (GKE Hub, Fleet, ASM, etc.), and any oversized diagrams or code samples** that would otherwise clutter the main text.
 
