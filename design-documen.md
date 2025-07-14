@@ -117,6 +117,10 @@ Cite the tool (e.g., Syft + Grype) and storage location of signed attestations. 
  * Minimum accepted SLSA level (e.g., Build L3)
  * Dependency-update policy (Renovate, Dependabot)
 
+**Compliance Traceability Matrix**
+
+Map every ISO 27001 control, GDPR article, or internal policy to a template section. Include a one-line “evidence pointer” (link to runbook, Terraform state, etc.). This shortens external audits dramatically.
+
 ## 10. Scalability, Reliability, Performance & Resilience
 
 Declare **SLIs/SLOs, error-budget policy, quorum or consensus strategy, multi-cluster fail-over design, and the incident-command process used during outages**.
