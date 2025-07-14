@@ -97,7 +97,7 @@ Specify **exported metrics, structured logs, traces, alert rules, dashboards, ru
 
 Clearly separate Metrics, Logs, Traces (MELT)
 
-Define the SLO -> Alert -> Runbook chain
+Define the SLO -> Alert -> Runbook chain -> Escalation path/paths
 
 Add obligatory Grafana/Prometheus dashboards (links to JSON)
 
