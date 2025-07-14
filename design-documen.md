@@ -14,6 +14,8 @@ Below is design-documentation template. This template unifies proven SDD convent
 * **Key risks**
 * **C4-1 level diagram**
 
+Use C4 notation (PlantUML or [Structurizr](https://structurizr.com/)) and store .puml along with ADR files (Architectural Decision Records). C4 is consistently perceived by engineers and managers
+
 ## System Overview
 
 *Capture basic System identity and ownership.*
@@ -56,6 +58,13 @@ For every component list **responsibility, inputs/outputs, Kubernetes resource t
 ## 5. Infrastructure & Deployment Topology
 
 Diagram **on-prem Anthos clusters (bare-metal), regional GKE clusters, fleet membership, failure-domains, Cloud Network and DNS strategy**.
+
+Specify the multi-tenancy model (soft/hard)
+
+Describe the baseline hardening: PodSecurityProfiles, Admission Controller sheet, CIS Benchmark score target 
+DevOpsCube
+
+Specify fault-domains: rack, DC, region.
 
 ## 6. Dependencies, Interfaces, Integrations & Third-Party Services
 
