@@ -139,6 +139,12 @@ Failure modes, alerting, auto-healing, runbooks; include etcd snapshot/restore p
 
 Unit, integration, performance
 
+## 20. Describe Disaster Recovery
+
+Add a clear recovery process. For example etcdutl, snapshot, restore for all nodes from a single file, changing member ID before re-joining
+
+Describe the frequency and check of DR drills (at least once a quarter)
+
 ## 20. References, Glossary & Appendices
 
 Provide **source documents, a glossary of Anthos terms (GKE Hub, Fleet, ASM, etc.), and any oversized diagrams or code samples** that would otherwise clutter the main text.
