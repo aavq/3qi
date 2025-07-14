@@ -95,6 +95,14 @@ Detail **horizontal/vertical autoscaling rules, resource limits/requests, repres
 
 Specify **exported metrics, structured logs, traces, alert rules, dashboards, runbooks, and on-call escalation paths**—the "single pane of glass" for SREs.
 
+Clearly separate Metrics, Logs, Traces (MELT)
+
+Define the SLO -> Alert -> Runbook chain
+
+Add obligatory Grafana/Prometheus dashboards (links to JSON)
+
+This makes SRE's life easier and specifies the error budget policy.
+
 ## 12. Configuration & Runtime Environment
 
 Apply **Twelve-Factor principles—config via environment variables, immutable container images, and strict separation of code and state**.
