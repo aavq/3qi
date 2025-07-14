@@ -8,6 +8,13 @@ Below is design-documentation template. This template unifies proven SDD convent
 2. Fill all *italicised mandatory* fields in the first pass.
 3. Attach diagrams and CI/CD artefacts for each design review iteration.
 
+## Revision History
+
+| Version | Date       | Author  | Summary                                 |
+|---------|------------|---------|-----------------------------------------|
+| 1.0.1   | 2025-07-14 | Smirnov | Added supply-chain sec & compliance map |
+
+
 ## Executive Summary
 
 * **Business price**
@@ -45,7 +52,7 @@ Provide **System-Context and Container diagrams** that show how the subsystem fi
 
 *Logical -> high-level physical; include diagrams.*
 
-* Methodology (12-factor, Googole, AWS, Asure, etc.)
+* Methodology (12-factor, Googole, AWS, Azure, etc.)
 * Logical diagram (services, flows)
 * Physical diagram (nodes, networks)
 * Supporting artefacts: Helm-chart dependency graphs, CI/CD pipeline drafts
@@ -62,7 +69,6 @@ Diagram **on-prem Anthos clusters (bare-metal), regional GKE clusters, fleet mem
 Specify the multi-tenancy model (soft/hard)
 
 Describe the baseline hardening: PodSecurityProfiles, Admission Controller sheet, CIS Benchmark score target 
-DevOpsCube
 
 Specify fault-domains: rack, DC, region.
 
