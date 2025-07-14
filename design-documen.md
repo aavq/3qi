@@ -8,7 +8,9 @@ Below is design-documentation template. This template unifies proven SDD convent
 2. Fill all *italicised mandatory* fields in the first pass.
 3. Attach diagrams and CI/CD artefacts for each design review iteration.
 
-## 0. System Overview
+## Executive Summary
+
+## System Overview
 
 *Capture basic System identity and ownership.*
 
