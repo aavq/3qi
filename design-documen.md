@@ -81,6 +81,16 @@ The matrix simplifies the verification of compliance with ISO 27001 and other st
 
 Cover **authentication/authorization (Workload Identity, RBAC), network policies, encryption at-rest/in-transit, secret management, and regulatory standards (ISO 27001, GDPR, etc.)**.
 
+Enable Threat Modeling
+
+Add the **STRIDE / DREAD**:
+
+| Threat             | Impact               | Mitigation  |
+| ------------------ | -------------------- | ----------- |
+| Spoofing API token | privilege escalation | mTLS + RBAC |
+
+The approach is supported in the Kubernetes Security Whitepaper. This reduces audit time.
+
 ## 10. Scalability, Reliability, Performance & Resilience
 
 Declare **SLIs/SLOs, error-budget policy, quorum or consensus strategy, multi-cluster fail-over design, and the incident-command process used during outages**.
