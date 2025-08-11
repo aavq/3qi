@@ -1,0 +1,666 @@
+---
+---
+---
+
+Отличная идея — такой шаблон экономит кучу времени и снижает «bus factor». Ниже даю **корневой, максимально простой шаблон** (копируй как Markdown), плюс **расширяемые модули** (добавляешь по мере необходимости). Я ориентировался на bare-metal k8s + Anthos + интеграции с GCP и на то, что документом будут пользоваться и разработчики, и Ops/SRE.
+
+---
+
+# 📄 Шаблон «Design Doc для k8s-компонента»
+
+````markdown
+---
+title: <Имя компонента>
+component_id: <уникальный-id>
+owners: ["<ФИО/логины>"]
+stakeholders: ["Platform", "Security", "FinOps", "Tenant X"]
+status: Draft | In-Review | Approved | Active | Deprecated | Retired
+doc_version: "v1.0.0"
+component_version: "<semver/commit>"
+last_reviewed: "YYYY-MM-DD"
+next_review_due: "YYYY-MM-DD"
+links:
+  repo: "<git-url>"
+  ci_cd: "<pipeline-url>"
+  adr: ["<adr-001-...>"]
+  dashboards: ["<grafana-url>"]
+  alerts: ["<alertmanager/url or policy>"]
+  runbooks: ["<runbook-1>", "<runbook-2>"]
+  argo_app: "<argo-app if any>"
+  pages: "<doc site>"
+---
+
+## 0. Жизненный цикл документа
+- **Цель документа:** кратко зачем существует документ.
+- **Аудит-ревью:** раз в N месяцев; владелец: <Имя/Роль>.
+- **Как вносить изменения:** PR в репозиторий `docs/`, обязательные ревьюеры: <список>.
+- **Критерии статусов:** 
+  - *Draft* — сбор требований; 
+  - *In-Review* — архитектурная оценка;
+  - *Approved* — согласовано; 
+  - *Active* — реализовано и в проде; 
+  - *Deprecated/Retired* — план/факт вывода из эксплуатации.
+- **История изменений (changelog):** краткий список ключевых апдейтов.
+
+## 1. Что и для кого мы делаем?
+- **Краткое описание:** 1–2 абзаца, что делает компонент, какую ценность даёт.
+- **Кому полезно (персоны/роли):** Tenants, Platform, SRE, Security, Billing.
+- **Бизнес-цели / KPI:** <цель>, <метрика успеха/SLI>, <приемочные критерии>.
+- **Негативные цели (Out of scope):** <что сознательно не делаем>.
+
+## 2. Как деплоится в кластере
+- **Способ доставки:** Helm/Kustomize/ArgoCD/Flux (указать какой и где манифесты).
+- **Окружения:** dev / preprod / prod; стратегия раскатки (Blue/Green, Canary, Argo Rollouts).
+- **Артефакты:** образ `<registry>/<project>/<image>:<tag>`, SBOM, подпись (cosign).
+- **Конфигурация:** ConfigMap/Secret, External Secrets (источник: GCP Secret Manager/KMS).
+- **Сетевое размещение:** Namespace, Service(ы), Ingress/ Istio Gateway + VirtualService.
+- **Сервис-меш:** mTLS (PeerAuthentication), RBAC/AuthorizationPolicy, DestinationRule.
+- **Скейлинг:** HPA/KEDA триггеры (CPU, mem, HTTP RPS, Pub/Sub и т.д.).
+- **План обновлений/откатов:** команды/процедура, совместимость версий (compat matrix).
+- **Размещение на нодах:** ресурсы, запросы/лимиты, affinity/tolerations, securityContext.
+- **Хранилище:** PVC/StorageClass, размер/класс, backup-политика.
+
+## 3. Внешние зависимости
+Сервисы вне кластера и/или внешние провайдеры.
+| Сервис/Ресурс | Провайдер | Доступ/Сеть | Аутентикация | SLA зависимости | Режим деградации |
+|---|---|---|---|---|---|
+| Pub/Sub topic `...` | GCP | VPC/VPN/Interconnect | IAM роль `<role>` | 99.9% | Retrying + DLQ |
+| Cloud SQL `...` | GCP | Private IP | IAM DB Auth | 99.95% | Read-only mode |
+
+- **Как тестировать локально/в dev без зависимости:** заглушки, эмуляторы, feature flags.
+
+## 4. Внутренние зависимости (инвентаризация k8s-ресурсов)
+| Класс | Имя | Namespace | Назначение | Критичность | Источник (helm/kustomize путь) | Порты/Протоколы | Requests/Limits | Хранение |
+|---|---|---|---|---|---|---|---|---|
+| Deployment | api | platform-x | REST API | P1 | charts/api | 8080/TCP | 200m/512Mi; 1/1Gi | - |
+| Service | api | platform-x | ClusterIP | P1 | charts/api | 8080 | - | - |
+| VirtualService | api | platform-x | Ingress | P1 | charts/mesh | 443/HTTP2 | - | - |
+| HPA | api | platform-x | Autoscale | P2 | charts/api | - | 50% CPU | - |
+| CronJob | gc | platform-x | Очистка | P3 | charts/gc | - | 100m/256Mi | - |
+| PVC | data | platform-x | Данные | P1 | charts/db | - | - | 200Gi / fast-ssd |
+
+---
+
+# 🛠 Operations
+
+## 5. Ранбуки (только практические шаги)
+**5.1. Инцидент: 5xx на ingress**
+- Симптомы/алерты: `<alert name>`, дашборд: `<url>`.
+- Диагностика (5–10 минут):  
+  1) `kubectl -n platform-x get pods -o wide` — ищем CrashLoopBackOff  
+  2) `istioctl proxy-config clusters <pod>` — проверяем upstream  
+  3) `kubectl -n platform-x logs deploy/api --tail=100` — ошибки?  
+- Временной обход: переключить трафик на предыдущий ревизионный сервис (Argo Rollouts: promote/abort).  
+- Устранение: откат Helm `helm rollback <release> <rev>` / Argo rollback.  
+- Пост-инцидент: RCA в 24 ч; добавить тест/алерт.
+
+**5.2. Инцидент: рост latency / ошибки БД**
+- Проверки: p95/p99, saturations (CPU, GC), пул соединений, ошибки SQL.
+- Действия: временно увеличить реплики/HPA max, пересоздать PVC **запретить** без бэкапа.
+
+> Для каждого алерта — ссылка на этот ранбук, ETA восстановления, владелец.
+
+## 6. Как деплоить (операционный цикл)
+- **Pre-checks:** кворум etcd ок, кластер здоров, место в пуле, образы в реестре.
+- **Команды раскатки:**  
+  - Helm:  
+    ```bash
+    helm upgrade --install api charts/api \
+      -n platform-x -f values/values-prod.yaml --atomic --timeout 10m
+    ```
+  - ArgoCD: sync policy, wave order; команда ручного sync/rollback.
+- **Smoke-тесты:** `GET /healthz`, функциональные пробы, synthetic checks.
+- **Валидация после релиза:** error budget burn, SLO пригоден, алерты зелёные.
+- **Откат:** одна команда + ссылка на ранбук (см. 5.1).
+
+## 7. Метрики (что и где)
+- **Экспортеры/источники:** app `/metrics` (Prometheus), kube-state-metrics, Istio telemetry.
+- **Ключевые SLI и правила записи:**
+  - *Availability:* `success_rate = 1 - rate(5xx[5m]) / rate(http_total[5m])`
+  - *Latency:* `histogram_quantile(0.95, rate(http_duration_bucket[5m]))`
+  - *Saturation:* CPU/mem, pod restarts, HPA activity.
+- **SLO/цели:** uptime ≥ 99.9%, p95 < 300ms (prod).
+- **Дашборды:** ссылки на Grafana uid.
+- **Алерты:** правило, порог, подавление, связь с ранбуком.
+
+## 8. Логи (какие и где)
+- **Сбор:** stdout/stderr через Fluent Bit/Vector → Loki/ELK/Cloud Logging.
+- **Формат:** JSON; обязательные поля: `trace_id`, `span_id`, `tenant_id`, `req_id`.
+- **Ретеншн:** dev 7 дней, prod 30–90 дней; PII маскирование.
+- **Поисковые примеры (Saved queries):** ссылка/шаблоны запросов.
+- **Корреляция:** как из алерта перейти в логи/трейсы.
+
+---
+````
+
+---
+
+## 🎯 Мини-пример заполнения для внешней зависимости (GCP)
+
+* **Cloud SQL (PostgreSQL 14)**
+  Доступ: Private IP через Cloud VPN/Interconnect.
+  Auth: IAM DB Auth + ротация сервис-аккаунтов раз в 90 дней.
+  **Fail mode:** переключение пула соединений в read-only, включение кэширования; алерт `db_error_rate > 1% 5m`.
+  **Тест в dev:** локальный Postgres в Kind или Cloud SQL Proxy; feature flag `USE_LOCAL_DB=true`.
+
+---
+
+## 📦 Минимальный набор файлов в репозитории (docs-as-code)
+
+```
+docs/
+  design/<component-id>.md          # этот документ
+  runbooks/<alert-or-symptom>.md    # по одному на сценарий
+  ops/deploy.md                     # пошаговая инструкция релиза
+  ops/rollback.md
+  ops/checklists.md                 # pre/post release чек-листы
+  adr/adr-001-...md                 # ключевые решения
+charts/ or kustomize/
+  ...
+```
+
+---
+
+## 🔌 Блоки, которые стоит добавить (часто упускают)
+
+1. **Безопасность и комплаенс**
+
+* Модель угроз (краткая): данные, каналы, кто злоумышленник.
+* Подписанные образы (cosign), политика admission (PSa/PSP-эквивалент, Kyverno/Gatekeeper).
+* Секреты: где хранятся, как ротируются, кто имеет доступ.
+* Сетевые политики (NetworkPolicy), mTLS/источники сертификатов.
+
+2. **Резервное копирование и DR**
+
+* Что бэкапим (PVC/БД/конфиг), чем (Velero, оператор БД), куда (bucket, регион).
+* RPO/RTO и как тестируем восстановление (частота DR-дрила).
+
+3. **Производительность и ёмкость**
+
+* Нагрузка (QPS, размер сообщений), профилирование, лимиты.
+* План масштабирования (горизонт/вертикаль, лимиты HPA/KEDA).
+
+4. **Сеть и многоокруженность/мультикластер (Anthos)**
+
+* Где живут эндпоинты, глобальный трафик, политика кросс-регионального фейловера.
+* Совместимость версий Istio/сетевых CRD.
+
+5. **Финансы/квоты**
+
+* Ожидаемая стоимость (хранилище, egress, GCP-сервисы), квоты GCP, бюджет-алерты.
+
+6. **Процедура вывода из эксплуатации (sunset)**
+
+* План миграции данных, дата EOL, кого уведомляем.
+
+7. **Качество/тестирование**
+
+* e2e в k8s (kind/ephemeral), тест-данные, chaos-scenarios.
+
+8. **Совместимость и матрица версий**
+
+* k8s/Istio/Sidecar API, клиенты/SDK, схемы БД.
+
+> Если хочется держать документ «тонким» — вынеси эти блоки в приложение (appendix) и оставь ссылки в основном шаблоне.
+
+---
+
+## 🧩 Набросок значений по умолчанию (можно вставить в values.yaml)
+
+```yaml
+resources:
+  requests: { cpu: "200m", memory: "512Mi" }
+  limits:   { cpu: "1",    memory: "1Gi" }
+readinessProbe:
+  httpGet: { path: /ready, port: 8080 }
+  periodSeconds: 10
+livenessProbe:
+  httpGet: { path: /healthz, port: 8080 }
+  periodSeconds: 10
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 60
+mesh:
+  mtls: strict
+logging:
+  format: json
+  include:
+    - trace_id
+    - span_id
+    - tenant_id
+    - request_id
+```
+
+---
+
+## ✅ Короткий чек-лист перед продом
+
+* [ ] Артефакты подписаны, SBOM приложен.
+* [ ] Секреты → External Secrets + KMS.
+* [ ] HPA/KEDA включены, лимиты заданы.
+* [ ] NetworkPolicy закрывает egress/ingress по минимуму.
+* [ ] SLO определён, алерты привязаны к ранбукам.
+* [ ] Дашборды графаны опубликованы и линки добавлены в документ.
+* [ ] DR-план и бэкапы проверены.
+* [ ] План отката опробован в preprod.
+
+---
+
+Если хочешь, могу сгенерировать **готовый файл** под твой первый компонент (с таблицами и заголовками) по его краткому описанию и стэку: Helm/Kustomize, Istio, внешние GCP-сервисы и т.д.
+
+---
+---
+---
+
+
+Got it, Löscha. Here’s a clean, copy-pasteable **English template** for a “Design Doc for a Kubernetes Component,” tuned for bare-metal Kubernetes + Anthos + GCP integrations. It’s lean by default and expandable via optional modules.
+
+---
+
+# Design Doc — Kubernetes Component
+
+````markdown
+---
+title: <Component name>
+component_id: <unique-id>
+owners: ["<name or team>"]
+stakeholders: ["Platform", "SRE", "Security", "FinOps", "Tenant X"]
+status: Draft | In-Review | Approved | Active | Deprecated | Retired
+doc_version: "v1.0.0"
+component_version: "<semver or commit>"
+last_reviewed: "YYYY-MM-DD"
+next_review_due: "YYYY-MM-DD"
+links:
+  repo: "<git-url>"
+  ci_cd: "<pipeline-url>"
+  adr: ["<adr-001-...>"]
+  dashboards: ["<grafana-url>"]
+  alerts: ["<alertmanager-url or policy>"]
+  runbooks: ["<runbook-1>", "<runbook-2>"]
+  argo_app: "<argocd-app if any>"
+  docs_site: "<internal-docs url>"
+---
+
+## 0. Document Lifecycle
+- **Purpose:** Why this document exists and who should use it.
+- **Change process:** PRs to `docs/` with mandatory reviewers: <list>.
+- **Review cadence:** Every <N> months; owner: <name/role>.
+- **Status criteria:**
+  - *Draft* — gathering requirements.
+  - *In-Review* — architecture review in progress.
+  - *Approved* — design signed off.
+  - *Active* — implemented and running in production.
+  - *Deprecated/Retired* — decommission plan / completed retirement.
+- **Changelog:** Bullet list of key changes with dates.
+
+## 1. What are we building and for whom? (Business goals)
+- **One-paragraph summary:** What the component does and the value it delivers.
+- **Primary users/roles:** Tenants, Platform, SRE, Security, Billing, etc.
+- **Business goals & KPIs:** <goal>, <success metric/SLI/SLO>, <acceptance criteria>.
+- **Explicit non-goals (out of scope):** What we intentionally exclude.
+
+## 2. How is it deployed in the cluster?
+- **Delivery mechanism:** Helm / Kustomize / Argo CD / Flux (where the manifests live).
+- **Environments & rollout strategy:** dev / preprod / prod; Blue-Green, Canary, Argo Rollouts.
+- **Artifacts:** Image `<registry>/<project>/<image>:<tag>`, SBOM, cosign signature.
+- **Config & secrets:** ConfigMap/Secret, External Secrets (GCP Secret Manager/KMS).
+- **Networking & exposure:** Namespace, Service(s), Ingress / Istio Gateway + VirtualService.
+- **Service mesh:** mTLS mode (PeerAuthentication), AuthorizationPolicy, DestinationRule.
+- **Scaling:** HPA/KEDA triggers (CPU/memory/RPS/Pub/Sub/etc.).
+- **Updates & rollback:** Commands/procedure, version compatibility matrix.
+- **Scheduling & resources:** requests/limits, affinity/tolerations, securityContext/PodSecurity.
+- **Storage:** PVC/StorageClass, size/class, backup policy, retention.
+- **Node constraints:** Bare-metal specifics (NICs, storage classes, NUMA if relevant).
+
+## 3. External dependencies
+List services outside the cluster and/or third-party providers.
+
+| Service / Resource             | Provider | Network Path                 | AuthN/AuthZ                   | Dependency SLA | Degradation / Fallback |
+|--------------------------------|----------|------------------------------|-------------------------------|----------------|------------------------|
+| Pub/Sub topic `projects/...`   | GCP      | VPC / VPN / Interconnect     | IAM SA `<service-account>`    | 99.9%          | Retry + DLQ            |
+| Cloud SQL `instances/...`      | GCP      | Private IP                   | IAM DB Auth / Workload ID     | 99.95%         | Read-only mode         |
+| SMTP relay `smtp.example.org`  | External | Egress via NAT / FW allow    | TLS + credentials in Secret   | n/a            | Queue + backoff        |
+
+- **Local/dev testing without dependency:** Emulators, stubs, feature flags.
+
+## 4. Internal dependencies (Kubernetes resource inventory)
+| Kind        | Name     | Namespace   | Purpose         | Criticality | Source path (helm/kustomize) | Ports/Proto | Requests/Limits   | Storage            |
+|-------------|----------|-------------|-----------------|------------|------------------------------|------------|-------------------|--------------------|
+| Deployment  | api      | platform-x  | REST API        | P1         | `charts/api`                 | 8080/TCP   | 200m/512Mi; 1/1Gi | –                  |
+| Service     | api      | platform-x  | ClusterIP       | P1         | `charts/api`                 | 8080       | –                 | –                  |
+| VirtualSvc  | api      | platform-x  | Ingress routing | P1         | `charts/mesh`                | 443/HTTP2  | –                 | –                  |
+| HPA         | api      | platform-x  | Autoscaling     | P2         | `charts/api`                 | –          | CPU 60%           | –                  |
+| CronJob     | gc       | platform-x  | Cleanup jobs    | P3         | `charts/gc`                  | –          | 100m/256Mi        | –                  |
+| PVC         | data     | platform-x  | App data        | P1         | `charts/db`                  | –          | –                 | 200Gi / fast-ssd   |
+
+---
+
+# Operations
+
+## 5. Runbooks (step-by-step)
+### 5.1 Incident: 5xx at ingress
+- **Signals/alerts:** `<alert-name>`, dashboard: `<grafana-url>`.
+- **Diagnosis (first 5–10 minutes):**
+  1. `kubectl -n platform-x get pods -o wide` — look for CrashLoopBackOff.
+  2. `istioctl proxy-config clusters <pod>` — upstream status.
+  3. `kubectl -n platform-x logs deploy/api --tail=100` — error patterns.
+- **Workaround:** Shift traffic to previous revision (Argo Rollouts promote/abort).
+- **Fix:** Helm `helm rollback <release> <rev>` or Argo rollback.
+- **Post-incident:** 24h RCA; add test/alert.
+
+### 5.2 Incident: elevated latency / DB errors
+- **Checks:** p95/p99, CPU/mem saturation, GC, connection pool, SQL errors.
+- **Actions:** Temporarily raise replicas/HPA max; feature-flag cache; never recreate PVC without a backup & plan.
+
+> Link each alert to a runbook, with ownership and expected TTR.
+
+## 6. How to deploy (Ops cycle)
+- **Pre-checks:** etcd quorum healthy, nodes ready, image exists in registry, free capacity in pool.
+- **Commands (examples):**
+  - **Helm**
+    ```bash
+    helm upgrade --install api charts/api \
+      -n platform-x -f values/values-prod.yaml --atomic --timeout 10m
+    ```
+  - **Argo CD**
+    - Sync policy: <auto/manual>; wave ordering documented.
+    - Manual commands: `argocd app sync <app>`; rollback instructions.
+- **Smoke tests:** `GET /healthz` and readiness; synthetic checks.
+- **Post-release validation:** error budget burn, SLO on track, no new alerts.
+- **Rollback:** one command + link to runbook 5.1.
+
+## 7. Metrics (what and where)
+- **Sources:** App `/metrics` (Prometheus), kube-state-metrics, Istio telemetry.
+- **Key SLIs (PromQL examples):**
+  - Availability:
+    ```
+    success_rate = 1 - (sum(rate(http_requests_total{status=~"5.."}[5m]))
+                         / sum(rate(http_requests_total[5m])))
+    ```
+  - Latency:
+    ```
+    histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))
+    ```
+  - Saturation: CPU/mem, restarts, HPA activity.
+- **SLO targets:** e.g., uptime ≥ 99.9%, p95 < 300 ms (prod).
+- **Dashboards:** Grafana UIDs/links.
+- **Alerts:** rule name, threshold, suppression policy, linked runbook.
+
+## 8. Logs (what and where)
+- **Collection:** stdout/stderr via Fluent Bit/Vector → Loki / ELK / Cloud Logging.
+- **Format:** JSON with mandatory fields: `trace_id`, `span_id`, `tenant_id`, `request_id`.
+- **Retention:** dev 7d; prod 30–90d; PII masking rules.
+- **Saved queries:** links or query templates.
+- **Correlation:** From alert → logs/traces workflow (how to pivot by trace_id).
+
+---
+
+# Appendices (Optional Modules — add as needed)
+
+## A. Security & Compliance
+- Threat model (brief): data handled, trust boundaries, likely attackers.
+- Signed images (cosign), SBOM, admission policy (Kyverno/Gatekeeper), Pod Security.
+- Secrets lifecycle: source of truth, rotation frequency, access controls.
+- NetworkPolicy baseline, mTLS, certificate sources and rotation.
+
+## B. Backup & Disaster Recovery
+- What is backed up (PVC/DB/config), tool (Velero/operator), target bucket/region.
+- RPO / RTO, DR drills (frequency, last tested on).
+
+## C. Performance & Capacity
+- Expected load (QPS, payload sizes), profiling notes.
+- Scaling plan (horizontal/vertical), HPA/KEDA bounds, resource headroom.
+
+## D. Networking & Multicluster (Anthos)
+- Endpoint locations, global routing, failover policy.
+- Istio/mesh CRD version compatibility and upgrade path.
+
+## E. FinOps & Quotas
+- Cost drivers (storage, egress, GCP services), budget alerts.
+- GCP quotas required and monitoring.
+
+## F. Decommissioning (Sunset Plan)
+- Data migration/archival steps, EOL date, stakeholder notifications.
+
+## G. Quality & Testing
+- e2e in ephemeral Kubernetes (kind), test data strategy, chaos scenarios.
+
+## H. Compatibility Matrix
+- k8s/Istio/sidecar versions, client SDKs, DB schema versions, API compatibility notes.
+
+````
+
+---
+
+## Minimal repo layout (docs-as-code)
+
+```
+docs/
+  design/<component-id>.md
+  runbooks/<alert-or-symptom>.md
+  ops/deploy.md
+  ops/rollback.md
+  ops/checklists.md
+  adr/adr-001-...md
+charts/ or kustomize/
+  ...
+```
+
+## Opinionated defaults (drop into `values.yaml` if useful)
+
+```yaml
+resources:
+  requests: { cpu: "200m", memory: "512Mi" }
+  limits:   { cpu: "1",    memory: "1Gi" }
+readinessProbe:
+  httpGet: { path: /ready,  port: 8080 }
+  periodSeconds: 10
+livenessProbe:
+  httpGet: { path: /healthz, port: 8080 }
+  periodSeconds: 10
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 60
+mesh:
+  mtls: strict
+logging:
+  format: json
+  include: [trace_id, span_id, tenant_id, request_id]
+```
+
+## Pre-prod checklist (quick)
+
+* [ ] Images signed; SBOM attached.
+* [ ] Secrets via External Secrets + KMS; rotation policy documented.
+* [ ] Requests/limits set; HPA/KEDA configured.
+* [ ] NetworkPolicy least-privilege for ingress/egress.
+* [ ] SLOs defined; alerts linked to runbooks.
+* [ ] Grafana dashboards published and linked here.
+* [ ] Backups and DR plan verified.
+* [ ] Rollback tested in preprod.
+
+---
+
+If you want, tell me the first component’s basics (name, envs, delivery tool, GCP services), and I’ll prefill this template with realistic examples and tables.
+
+
+
+---
+---
+---
+
+---
+title: <Component name>
+component_id: <unique-id>
+owners: ["<name or team>"]
+stakeholders: ["Platform", "SRE", "Security", "FinOps", "Tenant X"]
+status: Draft | In-Review | Approved | Active | Deprecated | Retired
+doc_version: "v1.0.0"
+component_version: "<semver or commit>"
+last_reviewed: "YYYY-MM-DD"
+next_review_due: "YYYY-MM-DD"
+links:
+  repo: "<git-url>"
+  ci_cd: "<pipeline-url>"
+  adr: ["<adr-001-...>"]
+  dashboards: ["<grafana-url>"]
+  alerts: ["<alertmanager-url or policy>"]
+  runbooks: ["<runbook-1>", "<runbook-2>"]
+  argo_app: "<argocd-app if any>"
+  docs_site: "<internal-docs url>"
+---
+
+## 0. Document Lifecycle
+- **Purpose:** Why this document exists and who should use it.
+- **Change process:** PRs to `docs/` with mandatory reviewers: <list>.
+- **Review cadence:** Every <N> months; owner: <name/role>.
+- **Status criteria:**
+  - *Draft* — gathering requirements.
+  - *In-Review* — architecture review in progress.
+  - *Approved* — design signed off.
+  - *Active* — implemented and running in production.
+  - *Deprecated/Retired* — decommission plan / completed retirement.
+- **Changelog:** Bullet list of key changes with dates.
+
+## 1. What are we building and for whom? (Business goals)
+- **One-paragraph summary:** What the component does and the value it delivers.
+- **Primary users/roles:** Tenants, Platform, SRE, Security, Billing, etc.
+- **Business goals & KPIs:** <goal>, <success metric/SLI/SLO>, <acceptance criteria>.
+- **Explicit non-goals (out of scope):** What we intentionally exclude.
+
+## 2. How is it deployed in the cluster?
+- **Delivery mechanism:** Helm / Kustomize / Argo CD / Flux (where the manifests live).
+- **Environments & rollout strategy:** dev / preprod / prod; Blue-Green, Canary, Argo Rollouts.
+- **Artifacts:** Image `<registry>/<project>/<image>:<tag>`, SBOM, cosign signature.
+- **Config & secrets:** ConfigMap/Secret, External Secrets (GCP Secret Manager/KMS).
+- **Networking & exposure:** Namespace, Service(s), Ingress / Istio Gateway + VirtualService.
+- **Service mesh:** mTLS mode (PeerAuthentication), AuthorizationPolicy, DestinationRule.
+- **Scaling:** HPA/KEDA triggers (CPU/memory/RPS/Pub/Sub/etc.).
+- **Updates & rollback:** Commands/procedure, version compatibility matrix.
+- **Scheduling & resources:** requests/limits, affinity/tolerations, securityContext/PodSecurity.
+- **Storage:** PVC/StorageClass, size/class, backup policy, retention.
+- **Node constraints:** Bare-metal specifics (NICs, storage classes, NUMA if relevant).
+
+## 3. External dependencies
+List services outside the cluster and/or third-party providers.
+
+| Service / Resource             | Provider | Network Path                 | AuthN/AuthZ                   | Dependency SLA | Degradation / Fallback |
+|--------------------------------|----------|------------------------------|-------------------------------|----------------|------------------------|
+| Pub/Sub topic `projects/...`   | GCP      | VPC / VPN / Interconnect     | IAM SA `<service-account>`    | 99.9%          | Retry + DLQ            |
+| Cloud SQL `instances/...`      | GCP      | Private IP                   | IAM DB Auth / Workload ID     | 99.95%         | Read-only mode         |
+| SMTP relay `smtp.example.org`  | External | Egress via NAT / FW allow    | TLS + credentials in Secret   | n/a            | Queue + backoff        |
+
+- **Local/dev testing without dependency:** Emulators, stubs, feature flags.
+
+## 4. Internal dependencies (Kubernetes resource inventory)
+| Kind        | Name     | Namespace   | Purpose         | Criticality | Source path (helm/kustomize) | Ports/Proto | Requests/Limits   | Storage            |
+|-------------|----------|-------------|-----------------|------------|------------------------------|------------|-------------------|--------------------|
+| Deployment  | api      | platform-x  | REST API        | P1         | `charts/api`                 | 8080/TCP   | 200m/512Mi; 1/1Gi | –                  |
+| Service     | api      | platform-x  | ClusterIP       | P1         | `charts/api`                 | 8080       | –                 | –                  |
+| VirtualSvc  | api      | platform-x  | Ingress routing | P1         | `charts/mesh`                | 443/HTTP2  | –                 | –                  |
+| HPA         | api      | platform-x  | Autoscaling     | P2         | `charts/api`                 | –          | CPU 60%           | –                  |
+| CronJob     | gc       | platform-x  | Cleanup jobs    | P3         | `charts/gc`                  | –          | 100m/256Mi        | –                  |
+| PVC         | data     | platform-x  | App data        | P1         | `charts/db`                  | –          | –                 | 200Gi / fast-ssd   |
+
+---
+
+# Operations
+
+## 5. Runbooks (step-by-step)
+### 5.1 Incident: 5xx at ingress
+- **Signals/alerts:** `<alert-name>`, dashboard: `<grafana-url>`.
+- **Diagnosis (first 5–10 minutes):**
+  1. `kubectl -n platform-x get pods -o wide` — look for CrashLoopBackOff.
+  2. `istioctl proxy-config clusters <pod>` — upstream status.
+  3. `kubectl -n platform-x logs deploy/api --tail=100` — error patterns.
+- **Workaround:** Shift traffic to previous revision (Argo Rollouts promote/abort).
+- **Fix:** Helm `helm rollback <release> <rev>` or Argo rollback.
+- **Post-incident:** 24h RCA; add test/alert.
+
+### 5.2 Incident: elevated latency / DB errors
+- **Checks:** p95/p99, CPU/mem saturation, GC, connection pool, SQL errors.
+- **Actions:** Temporarily raise replicas/HPA max; feature-flag cache; never recreate PVC without a backup & plan.
+
+> Link each alert to a runbook, with ownership and expected TTR.
+
+## 6. How to deploy (Ops cycle)
+- **Pre-checks:** etcd quorum healthy, nodes ready, image exists in registry, free capacity in pool.
+- **Commands (examples):**
+  - **Helm**
+    ```bash
+    helm upgrade --install api charts/api \
+      -n platform-x -f values/values-prod.yaml --atomic --timeout 10m
+    ```
+  - **Argo CD**
+    - Sync policy: <auto/manual>; wave ordering documented.
+    - Manual commands: `argocd app sync <app>`; rollback instructions.
+- **Smoke tests:** `GET /healthz` and readiness; synthetic checks.
+- **Post-release validation:** error budget burn, SLO on track, no new alerts.
+- **Rollback:** one command + link to runbook 5.1.
+
+## 7. Metrics (what and where)
+- **Sources:** App `/metrics` (Prometheus), kube-state-metrics, Istio telemetry.
+- **Key SLIs (PromQL examples):**
+  - Availability:
+    ```
+    success_rate = 1 - (sum(rate(http_requests_total{status=~"5.."}[5m]))
+                         / sum(rate(http_requests_total[5m])))
+    ```
+  - Latency:
+    ```
+    histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))
+    ```
+  - Saturation: CPU/mem, restarts, HPA activity.
+- **SLO targets:** e.g., uptime ≥ 99.9%, p95 < 300 ms (prod).
+- **Dashboards:** Grafana UIDs/links.
+- **Alerts:** rule name, threshold, suppression policy, linked runbook.
+
+## 8. Logs (what and where)
+- **Collection:** stdout/stderr via Fluent Bit/Vector → Loki / ELK / Cloud Logging.
+- **Format:** JSON with mandatory fields: `trace_id`, `span_id`, `tenant_id`, `request_id`.
+- **Retention:** dev 7d; prod 30–90d; PII masking rules.
+- **Saved queries:** links or query templates.
+- **Correlation:** From alert → logs/traces workflow (how to pivot by trace_id).
+
+---
+
+# Appendices (Optional Modules — add as needed)
+
+## A. Security & Compliance
+- Threat model (brief): data handled, trust boundaries, likely attackers.
+- Signed images (cosign), SBOM, admission policy (Kyverno/Gatekeeper), Pod Security.
+- Secrets lifecycle: source of truth, rotation frequency, access controls.
+- NetworkPolicy baseline, mTLS, certificate sources and rotation.
+
+## B. Backup & Disaster Recovery
+- What is backed up (PVC/DB/config), tool (Velero/operator), target bucket/region.
+- RPO / RTO, DR drills (frequency, last tested on).
+
+## C. Performance & Capacity
+- Expected load (QPS, payload sizes), profiling notes.
+- Scaling plan (horizontal/vertical), HPA/KEDA bounds, resource headroom.
+
+## D. Networking & Multicluster (Anthos)
+- Endpoint locations, global routing, failover policy.
+- Istio/mesh CRD version compatibility and upgrade path.
+
+## E. FinOps & Quotas
+- Cost drivers (storage, egress, GCP services), budget alerts.
+- GCP quotas required and monitoring.
+
+## F. Decommissioning (Sunset Plan)
+- Data migration/archival steps, EOL date, stakeholder notifications.
+
+## G. Quality & Testing
+- e2e in ephemeral Kubernetes (kind), test data strategy, chaos scenarios.
+
+## H. Compatibility Matrix
+- k8s/Istio/sidecar versions, client SDKs, DB schema versions, API compatibility notes.
+
+
+
+
