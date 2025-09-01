@@ -586,3 +586,134 @@ kubectl -n kiali run tmp-curl --rm -it --restart=Never --image=curlimages/curl:8
 
 Если хочешь, покажи результат `curl -I` после отключения прокси и текущее значение `spec.server.web_root` — скажу, нужно ли править Kiali CR или хватит маршрута.
 
+
+
+---
+
+
+Отлично, теперь видно «чистую» картину:
+
+* `http://127.0.0.1:20001/kiali/` → **200 OK**
+* `http://127.0.0.1:20001/kiali/api/auth/info` → **404 Not Found**
+
+Это почти железно означает: **UI у Kiali открыт с корня (`/`), а не под префиксом `/kiali`**. Поэтому HTML на `/kiali/` Kiali отдаёт (SPA подсовывает `index.html`), а **API** он слушает по пути **`/api/...`**, а не `/kiali/api/...`. Отсюда и твои 404 через ингресс.
+
+Быстрая проверка гипотезы (ещё локально, без прокси):
+
+```bash
+curl -I --noproxy 127.0.0.1 http://127.0.0.1:20001/api/auth/info
+# ожидаемо: 200/401/302 (но точно не 404)
+```
+
+Если так и есть — нужно **задать префикс публикации в конфиге Kiali**.
+
+---
+
+## Что такое «Kiali CR»
+
+**Kiali CR** (Custom Resource) — это объект Kubernetes вида `Kind: Kiali` (API `kiali.io/v1alpha1`), который «читает» **Kiali Operator** и на его основе создаёт/обновляет Deployment, Service, ConfigMap и т.д.
+Т.е. правишь CR → оператор пересоздаёт конфиг и поды Kiali.
+
+Найти и посмотреть:
+
+```bash
+# найдём, в каком ns лежит CR (чаще всего тот же, где Kiali)
+kubectl get kiali -A
+
+# посмотрим текущий web_root
+kubectl -n <ns-kiali> get kiali <имя-cr> -o jsonpath='{.spec.server.web_root}{"\n"}'
+```
+
+---
+
+## Исправление: выставить префикс `/kiali`
+
+### Вариант A — у тебя стоит **Kiali Operator** (есть Kiali CR)
+
+```bash
+kubectl -n <ns-kiali> patch kiali <имя-cr> --type merge -p \
+'{"spec":{"server":{"web_root":"/kiali"}}}'
+```
+
+Дождись, пока оператор перекатит Pod Kiali (1–2 минуты).
+
+### Вариант B — у тебя **Helm** без оператора
+
+Нужен апдейт values:
+
+```yaml
+# values.yaml
+server:
+  web_root: "/kiali"
+auth:
+  strategy: openid   # как у тебя
+  # остальное без изменений
+```
+
+И применяем:
+
+```bash
+helm upgrade <release> kiali/kiali-server -n <ns-kiali> -f values.yaml
+```
+
+> Примечание: оператор тоже пишет эту настройку в `ConfigMap/kiali` (ключ `config.yaml`). Если CR нет, можно временно править её вручную, но правильнее через Helm/CR.
+
+---
+
+## Проверки после фикса
+
+1. Локально (через port-forward, **без прокси**):
+
+```bash
+kubectl -n <ns-kiali> port-forward svc/kiali 20001:20001
+curl -I --noproxy 127.0.0.1 http://127.0.0.1:20001/kiali/                 # 200/302/303
+curl -I --noproxy 127.0.0.1 http://127.0.0.1:20001/kiali/api/auth/info     # 200/401/302 (не 404)
+```
+
+2. Через твой FQDN (ingress **без rewrite** пути):
+
+```bash
+curl -I https://<host>/kiali/                 # больше не 404
+curl -I https://<host>/kiali/api/auth/info    # 200/401/302 (не 404)
+```
+
+3. В **VirtualService** путь **не переписываем**, просто роутим `/kiali(/|$)` на сервис Kiali и добавляем заголовки:
+
+```yaml
+http:
+- match:
+  - uri: { prefix: /kiali/ }
+  - uri: { exact: /kiali }
+  headers:
+    request:
+      set:
+        X-Forwarded-Proto: "https"
+        X-Forwarded-Host:  "<host>"
+        X-Forwarded-Port:  "443"
+  route:
+  - destination:
+      host: kiali.<ns-kiali>.svc.cluster.local
+      port: { number: 20001 }
+```
+
+---
+
+## Возврат к твоей OIDC-проблеме
+
+Когда `/kiali/api/...` перестанет быть 404:
+
+* В браузере появится **callback** от IdP (URL с `code` и `state`).
+* В ответе callback Kiali выставит `Set-Cookie: kiali-token-...`.
+* В следующем запросе к `/kiali/api/...` эта cookie должна **уходить**.
+  Если cookie не уходит — тогда уже смотрим атрибуты `SameSite=None; Secure`, `Domain/Path` и `X-Forwarded-*` (но это следующий слой, после починки `web_root`).
+
+---
+
+Если покажешь вывод:
+
+```bash
+kubectl -n <ns-kiali> get kiali -A
+kubectl -n <ns-kiali> get kiali <имя-cr> -o yaml | sed -n '1,120p' | sed -n '/server:/,/^$/p'
+```
+
+или, для Helm, кусок `values.yaml` с `server.web_root`, я проверю, что именно нужно править у тебя.
