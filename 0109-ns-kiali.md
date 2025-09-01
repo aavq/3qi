@@ -313,3 +313,180 @@ curl -I https://<host>/kiali/api/auth/info        # 200/401/302, но не 404
 
 Если пришлёшь свой `VirtualService/Gateway` и кусок `spec.server` из Kiali CR, я максимально конкретно укажу, что там сейчас ломает маршрут.
 
+
+---
+
+Отличная зацепка. По снимку видно, что:
+
+```
+curl -I https://<host>/kiali/api/
+curl -I https://<host>/kiali/auth/
+```
+
+дают **HTTP/2 404** от **istio-envoy**. В сумме с тем, что в DevTools ты вообще не видишь callback-запроса, это почти наверняка означает:
+
+# Наиболее вероятная причина
+
+**Путь-префикс `/kiali` снаружи не согласован с тем, как Kiali опубликован внутри**: либо Ingress/Gateway не маршрутизирует `/kiali/*` в сервис Kiali (или переписывает путь неверно), либо в Kiali неверно задан `web_root`. В результате браузер возвращается с IdP на `https://<host>/kiali/.../callback`, но этот путь **не доезжает** до Kiali → cookie не ставится → `session not found`.
+
+---
+
+# Что проверить и как починить (пошагово)
+
+## 1) Быстрый sanity-check путей
+
+1. Проверь базовую страницу UI (должна не быть 404):
+
+   ```bash
+   curl -I https://<host>/kiali/        # ожидаемо 200/302/303, но НЕ 404
+   ```
+2. Проверь «живой» API-эндпойнт (часто требует 302 к логину, но НЕ 404):
+
+   ```bash
+   curl -I https://<host>/kiali/api/auth/info
+   ```
+
+   Если и это 404 — запрос не попадает в Kiali (маршрутизация/префикс).
+
+> 404 именно от **istio-envoy** обычно означает, что **VirtualService/Gateway не матчится** на такой путь/хост или есть неправильный rewrite.
+
+## 2) Приведи в соответствие `web_root` и маршрутизацию (вариант без rewrite — самый простой)
+
+**A. В Kiali CR** (неймспейс, где развернут Kiali):
+
+```yaml
+spec:
+  server:
+    web_root: "/kiali"   # критично, если снаружи публикуешь под /kiali
+```
+
+**B. В Istio (Gateway + VirtualService)** — маршрутизируй **без переписывания пути**:
+
+```yaml
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: kiali-gw
+  namespace: <ns-ingress>        # где у тебя ingressgateway
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 443
+      name: https
+      protocol: HTTPS
+    tls:
+      mode: SIMPLE
+      credentialName: <tls-secret> # твой секрет с сертификатом
+    hosts:
+    - kiali.asm-uk-wdc-01.dev.fichc.intranet.db.com
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: kiali-vs
+  namespace: <ns-ingress>
+spec:
+  hosts:
+  - kiali.asm-uk-wdc-01.dev.fichc.intranet.db.com
+  gateways:
+  - kiali-gw
+  http:
+  - match:
+    - uri:
+        prefix: /kiali/
+    - uri:
+        exact: /kiali
+    headers:
+      request:
+        set:
+          X-Forwarded-Proto: "https"
+          X-Forwarded-Host:  "kiali.asm-uk-wdc-01.dev.fichc.intranet.db.com"
+          X-Forwarded-Port:  "443"
+    route:
+    - destination:
+        host: kiali.<ns-kiali>.svc.cluster.local
+        port:
+          number: 20001         # стандартный порт сервиса Kiali
+```
+
+> Ключевые моменты:
+>
+> * **нет `rewrite`** — путь `/kiali/...` доезжает до бэкенда как есть, что соответствует `web_root: "/kiali"`;
+> * добавлены `X-Forwarded-*`, чтобы Kiali корректно формировал `redirect_uri` и cookie;
+> * `hosts/gateway` совпадают с внешним FQDN.
+
+**Альтернатива (реже):** если хочешь **переписывать** `/kiali/...` во внутрь на `/...`, тогда *не* ставь `web_root: "/kiali"` (оставь `/`) и тщательно синхронизируй `redirect_uri` у клиента в IdP (и параметр `external_url`, если используешь) — это сложнее, легко ошибиться. Я бы шёл вариантом выше (без rewrite).
+
+## 3) Проверь, что маршрут реально есть в ingress-envoy
+
+* Посмотри маршруты:
+
+  ```bash
+  istioctl proxy-config routes -n <ns-ingress> deploy/istio-ingressgateway | grep -A5 kiali
+  ```
+
+  Должен быть match на `/kiali` для твоего хоста и роут на кластер `kiali`.
+* Хвост access-логов ingressgateway во время твоего `curl`:
+
+  ```bash
+  kubectl -n <ns-ingress> logs deploy/istio-ingressgateway -f --tail=100
+  ```
+
+  Если видишь `404 NR` (No Route) — VirtualService не матчится. Если роутится в другой upstream — конфликт с другим VS.
+
+## 4) Повтори curl-проверку
+
+```bash
+curl -I https://<host>/kiali/                     # теперь должно быть 200/302/303
+curl -I https://<host>/kiali/api/auth/info        # 200/401/302, но не 404
+```
+
+## 5) Проверь `redirect_uri` фактически используемый при OIDC
+
+В DevTools → Network найди первый запрос к твоему IdP (`/authorize`) и посмотри параметр **`redirect_uri`**:
+
+* он должен быть ровно `https://<host>/kiali` **(с префиксом, если он снаружи есть)** или конкретный callback под этим префиксом, в зависимости от версии Kiali;
+* такая же строка должна быть **разрешена в конфигурации клиента** у IdP.
+
+## 6) После появления callback — добей cookie/сессию
+
+Когда `/kiali/*` начал доходить до Kiali:
+
+* в ответе на callback появится `Set-Cookie: kiali-token-...`;
+* проверь атрибуты cookie в DevTools → Application → Cookies:
+
+  * `SameSite=None`, `Secure` (раз ты на HTTPS);
+  * корректные `Domain/Path` (при `web_root: "/kiali"` — `Path` должен покрывать `/kiali`).
+* следующий запрос к `/kiali/api/...` должен нести `Cookie: kiali-token-...`.
+
+---
+
+# Доп. проверки/диагностика
+
+* Локально минуя ingress:
+
+  ```bash
+  kubectl -n <ns-kiali> port-forward svc/kiali 20001:20001
+  curl -I http://127.0.0.1:20001/kiali/                  # должен отвечать
+  curl -I http://127.0.0.1:20001/kiali/api/auth/info
+  ```
+
+  Если локально всё ок, а через FQDN — 404, значит дело точно в Gateway/VirtualService.
+
+* Конфликты VS на тот же host: убедись, что **только один** VirtualService матчится на `kiali...db.com` с префиксом `/kiali`.
+
+---
+
+## Короткий «список починки»
+
+* [ ] `spec.server.web_root: "/kiali"` в Kiali CR (если публикуешь под /kiali).
+* [ ] VirtualService матчится на `/kiali(/|$)` **без rewrite** и ведёт на `svc/kiali:20001`.
+* [ ] Проставить `X-Forwarded-Proto/Host/Port` к бекэнду.
+* [ ] `curl -I https://<host>/kiali/` перестал быть 404.
+* [ ] В DevTools `redirect_uri` указывает на `https://<host>/kiali...`, callback виден, `Set-Cookie` появляется, cookie уходит.
+
+Если пришлёшь свой `VirtualService/Gateway` и кусок `spec.server` из Kiali CR, я максимально конкретно укажу, что там сейчас ломает маршрут.
+
