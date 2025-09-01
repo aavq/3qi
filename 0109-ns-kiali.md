@@ -490,3 +490,99 @@ curl -I https://<host>/kiali/api/auth/info        # 200/401/302, но не 404
 
 Если пришлёшь свой `VirtualService/Gateway` и кусок `spec.server` из Kiali CR, я максимально конкретно укажу, что там сейчас ломает маршрут.
 
+---
+
+Классная находка — по этому выводу видно, **почему тест “в обход ingress” не сработал**.
+
+## Что показывает твой скрин
+
+Ответы:
+
+```
+HTTP/1.1 403 UncategorizedBlocked
+Via: 1.1 10.237.152.35 (Skyhigh Secure Web Gateway ...)
+X-Frame-Options: deny
+```
+
+Это **ответ корпоративного веб-прокси (Skyhigh SWG)**, а не Kiali. Значит, твой `curl` на `http://127.0.0.1:20001/...` ушёл **через корпоративный прокси** (из-за настроек `http_proxy/https_proxy` и отсутствия `NO_PROXY` для `127.0.0.1,localhost`). Поэтому тест с `port-forward` даже не дошёл до Kiali.
+
+Итого: сейчас дело **не** в Gateway/VirtualService — ты просто не попал в локальный порт-форвард.
+
+---
+
+## Как правильно выполнить локальный тест (обойти прокси)
+
+### Вариант A — bash/zsh
+
+```bash
+# временно отключаем прокси
+unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
+export NO_PROXY="127.0.0.1,localhost"
+
+# или сразу в командe:
+curl -I --noproxy 127.0.0.1 http://127.0.0.1:20001/kiali/
+curl -I --noproxy 127.0.0.1 http://127.0.0.1:20001/kiali/api/auth/info
+```
+
+### Вариант B — PowerShell (Windows)
+
+```powershell
+$env:NO_PROXY = "127.0.0.1,localhost"
+Remove-Item Env:http_proxy  -ErrorAction SilentlyContinue
+Remove-Item Env:https_proxy -ErrorAction SilentlyContinue
+
+# важно звать настоящий curl.exe (а не алиас Invoke-WebRequest)
+curl.exe -I --noproxy 127.0.0.1 http://127.0.0.1:20001/kiali/
+curl.exe -I --noproxy 127.0.0.1 http://127.0.0.1:20001/kiali/api/auth/info
+```
+
+### Вариант C — прямо внутри кластера (вообще мимо вашего корпоративного прокси)
+
+```bash
+kubectl -n kiali run tmp-curl --rm -it --restart=Never --image=curlimages/curl:8.7.1 \
+  -- sh -c 'curl -I http://kiali.kiali.svc.cluster.local:20001/kiali/api/auth/info'
+```
+
+---
+
+## Что ты должен увидеть и как интерпретировать
+
+После **корректного** порт-форварда до Kiali:
+
+* `curl -I http://127.0.0.1:20001/kiali/` → **200/302/303**, но **не 404**
+* `curl -I http://127.0.0.1:20001/kiali/api/auth/info` → **200/401/302**, но **не 404**
+
+Дальше два сценария:
+
+1. **`/api/auth/info` (без `/kiali`) работает, а `/kiali/api/auth/info` — 404**
+   → у Kiali **не задан** префикс публикации. Почини так:
+
+   ```bash
+   kubectl -n kiali get kiali kiali -o jsonpath='{.spec.server.web_root}{"\n"}'
+   # если пусто или "/", то:
+   kubectl -n kiali patch kiali kiali --type merge -p '{"spec":{"server":{"web_root":"/kiali"}}}'
+   ```
+
+   И не делай rewrite пути в VirtualService — прокидывай `/kiali/...` как есть.
+
+2. **Оба пути дают 404**
+   → проблема не в префиксе, а в самом сервисе/порте (не тот порт в Service, не тот targetPort, Kiali ещё не запустился) — тогда:
+
+   ```bash
+   kubectl -n kiali get svc kiali -o yaml | egrep -i "port:|targetPort:|name:"
+   kubectl -n kiali get pods -l app=kiali
+   kubectl -n kiali logs deploy/kiali --tail=100
+   ```
+
+---
+
+## Что дальше по твоей основной задаче (OIDC)
+
+Как только локальные `curl` начнут отдавать **не** 404 на `/kiali/...`:
+
+1. Проверь через браузер с включённым **Preserve log**, что появился запрос на callback (URL с `code=` и `state=`).
+2. На callback-ответе Kiali должен вернуть `Set-Cookie: kiali-token-...`.
+3. В следующем запросе к `/kiali/api/...` эта cookie должна **уезжать** (если не уезжает — проверим `SameSite=None; Secure`, `Domain/Path` и `X-Forwarded-*` с ингресса).
+
+Если хочешь, покажи результат `curl -I` после отключения прокси и текущее значение `spec.server.web_root` — скажу, нужно ли править Kiali CR или хватит маршрута.
+
