@@ -295,3 +295,121 @@ deployment:
 
 ---
 
+
+Лöscha, вижу три вещи, которые сейчас мешают Kiali 2.15 «увидеть» ворклоады у тебя в установке через **ConfigMap** (без оператора).
+
+# Что починить в твоём файле прямо сейчас
+
+## 1) Пара меток приложения/версии
+
+В конфиге задано только:
+
+```yaml
+istio_labels:
+  version_label_name: app.kubernetes.io/version
+```
+
+Когда ты указываешь **хоть одно** поле из `istio_labels.*`, Kiali перестаёт «подбирать» разные схемы меток и ждёт **ровно пару** `app_label_name` + `version_label_name`.
+Если на Pod’ах у тебя повсеместно `app.kubernetes.io/name`, а поля `app_label_name` нет, Kiali не сопоставит Pod’ы ↔ workloads — в UI будет пусто, а в логах сыпятся «…labels \[] not found».
+
+**Исправление (вариант 1 — рекомендую):**
+
+```yaml
+istio_labels:
+  app_label_name: app.kubernetes.io/name
+  version_label_name: app.kubernetes.io/version
+```
+
+**Альтернатива (вариант 2):**
+вообще **убери** блок `istio_labels:` — тогда Kiali снова будет автоматически распознавать стандартные пары (`canonical-*`, `app.kubernetes.io/*`, `app`/`version`). Но лучше зафиксировать конкретную пару, чтобы поведение было предсказуемым.
+
+## 2) discovery\_selectors
+
+У тебя стоит пустой объект:
+
+```yaml
+deployment:
+  discovery_selectors: {}
+```
+
+Для установки **без оператора** он не даёт пользы и может путать: в server-конфиге это поле не нужно, а логика «селекторы заданы/не заданы» в 2.x влияет на то, какие неймспейсы Kiali сканирует.
+
+**Исправление:**
+просто **удали весь ключ** `discovery_selectors` (и весь блок `deployment:` тут не нужен — см. пункт 3).
+При отсутствии селекторов и с правильными RBAC Kiali покажет **все** (кроме системных) неймспейсов.
+Если захочешь включить системные — пометь их, например, `kiali.io/visible=true` и добавь селектор уже осознанно:
+
+```yaml
+deployment:
+  discovery_selectors:
+    default:
+      - matchLabels:
+          kiali.io/visible: "true"
+```
+
+(Но это нужно только при установке через оператор. В твоём сценарии — убрать.)
+
+## 3) Половина полей — «операторные» и сервер их игнорирует
+
+Ты кладёшь в ConfigMap **server-конфиг**, а в нём много полей, которые работают только при установке через **Kiali Operator/Helm**:
+`deployment.*`, `ingress.*`, `image_*`, `resources`, `replicas`, `security_context`, `service_type`, `node_selector`, `tolerations`, `priority_class_name`, `namespace`, `instance_name`, `version_label`, `view_only_mode` и т.д.
+Сервер эти ключи **не применяет**. Если опираться на них (например, на `cluster_wide_access: true`), можно создать ложное ощущение, что «доступ есть», хотя нужные **RBAC**-права надо выдавать отдельно (ClusterRole/Binding для serviceaccount Kiali).
+
+**Что сделать:**
+
+* Либо **очисти** ConfigMap от операторных ключей (оставь только то, что реально читает сервер: `server`, `auth`, `external_services`, `kubernetes_config`, `istio_labels`, `kiali_feature_flags`, `login_token`, `identity` и т.п.).
+* Либо просто **знай**, что всё из `deployment.*`/`ingress.*` здесь «декорации» и не работают.
+
+> Отдельно: `pod_labels: sidecar.istio.io/inject: "true"` — лучше убрать. Kiali обычно **не** запускают в mesh; сайдкар может мешать исходящему трафику на Kubernetes API и внешние сервисы (нужны ServiceEntry/права и пр.), что тоже приводит к пустым спискам.
+
+# Мини-патч (суть)
+
+```diff
+- istio_labels:
+-   version_label_name: app.kubernetes.io/version
++ istio_labels:
++   app_label_name: app.kubernetes.io/name
++   version_label_name: app.kubernetes.io/version
+
+- deployment:
+-   discovery_selectors: {}
++ # (удалить полностью весь ключ discovery_selectors; при желании — весь блок deployment: как неиспользуемый сервером)
+
+- pod_labels:
+-   sidecar.istio.io/inject: "true"
++ # (опционально удалить, чтобы не инжектить сайдкар в Kiali)
+```
+
+# Обязательные проверки (вне конфига)
+
+1. **RBAC** (так как у тебя нет оператора, он их не создаёт):
+
+```bash
+# подставь свой namespace/SA Kiali
+kubectl auth can-i --as=system:serviceaccount:kiali:kiali -A get pods
+kubectl auth can-i --as=system:serviceaccount:kiali:kiali -A list deployments
+kubectl auth can-i --as=system:serviceaccount:kiali:kiali -A watch namespaces
+```
+
+Все должны отвечать **yes**. Если нет — добавь кластерный read-only RBAC (ClusterRole/ClusterRoleBinding).
+
+2. **Метки на Pod’ах** — хотя бы где-то в кластере проверь, что действительно есть пара:
+
+```bash
+kubectl get pods -A \
+  -o custom-columns='NS:.metadata.namespace,POD:.metadata.name,APP:.metadata.labels.app\.kubernetes\.io/name,VER:.metadata.labels.app\.kubernetes\.io/version' \
+  | head -30
+```
+
+Если `APP`/`VER` пустые — нужно добавить метки в манифесты.
+
+---
+
+Если после этого workloads всё ещё пустые — пришли, пожалуйста:
+
+* вывод трёх `kubectl auth can-i …` из блока выше,
+* 10–15 строк старта логов Kiali (там видно, какие label names он принял и какие кластерные селекторы применил).
+  Добью до рабочей конфигурации.
+
+
+
