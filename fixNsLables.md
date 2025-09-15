@@ -577,3 +577,92 @@ kubectl get pods -A \
 
 ---
 
+
+Отличный вопрос. Нужно **узнать точные `namespace` и `serviceAccountName`**, с которыми реально стартует твой Kiali-pod, и использовать их в виде
+`system:serviceaccount:<NAMESPACE>:<SA_NAME>` (плюс группы для корректной имперсонизации).
+
+## 1) Найти namespace и ServiceAccount Kiali
+
+Попробуй по «стандартным» лейблам; если не найдёт — поменяй селектор на `app=kiali`.
+
+```bash
+# где запущен Kiali и какой SA использует
+kubectl get deploy -A -l app.kubernetes.io/name=kiali \
+  -o custom-columns='NS:.metadata.namespace,DEPLOY:.metadata.name,SA:.spec.template.spec.serviceAccountName'
+
+# если поле пустое → используется default SA соответствующего ns
+# проверим pod на всякий случай:
+kubectl get pod -A -l app.kubernetes.io/name=kiali \
+  -o custom-columns='NS:.metadata.namespace,POD:.metadata.name,SA:.spec.serviceAccountName'
+```
+
+Если `SA` пустой → это означает `serviceAccountName: default`, т.е. идентификатор будет
+`system:serviceaccount:<тот_же_namespace>:default`.
+
+## 2) Сформировать строку для `--as`
+
+Шаблон:
+
+```
+system:serviceaccount:<NAMESPACE>:<SA_NAME>
+```
+
+Примеры:
+
+* `system:serviceaccount:kiali:kiali`
+* `system:serviceaccount:istio-system:kiali`
+* `system:serviceaccount:kiali:default` (если SA не задан в deployment)
+
+## 3) ВАЖНО: добавить группы при имперсонизации
+
+Чтобы эмуляция была точной (иначе иногда выходят «ложные NO»), добавь группы сервис-аккаунтов:
+
+```
+--as-group=system:serviceaccounts \
+--as-group=system:serviceaccounts:<NAMESPACE> \
+--as-group=system:authenticated
+```
+
+## 4) Проверки прав (кластерные и namespace-овые)
+
+```bash
+NS=<подставь из шага 1>
+SA=<подставь из шага 1>
+AS="--as=system:serviceaccount:${NS}:${SA} \
+     --as-group=system:serviceaccounts \
+     --as-group=system:serviceaccounts:${NS} \
+     --as-group=system:authenticated"
+
+# кластерные ресурсы / все неймспейсы
+kubectl auth can-i ${AS} -A get pods
+kubectl auth can-i ${AS} -A list deployments
+kubectl auth can-i ${AS} -A watch namespaces
+kubectl auth can-i ${AS} get nodes
+
+# подробный список прав (в пределах одного ns)
+kubectl auth can-i ${AS} --list -n default
+```
+
+Ожидаемо всё выше должно быть **yes**, иначе Kiali не увидит ворклоады во всех ns.
+
+## 5) Где посмотреть, чем именно «скормлены» права SA
+
+Быстро найти биндинги, которые цепляют этот SA:
+
+```bash
+# ClusterRoleBinding'и, где фигурирует наш SA
+kubectl get clusterrolebinding -o json | \
+  jq -r '.items[] | select(.subjects[]? | .kind=="ServiceAccount" and .name=="'"$SA"'" and .namespace=="'"$NS"'") | .metadata.name'
+
+# Аналогично для RoleBinding (namespaced)
+kubectl get rolebinding -A -o json | \
+  jq -r '.items[] | select(.subjects[]? | .kind=="ServiceAccount" and .name=="'"$SA"'" and .namespace=="'"$NS"'") | [.metadata.namespace,.metadata.name] | @tsv'
+```
+
+(Если `jq` не под рукой — можно `kubectl get *binding -o yaml | grep` по имени SA/NS.)
+
+---
+
+Если хочешь, сгенерирую минимальные `ClusterRole`/`ClusterRoleBinding` под найденные `NS` и `SA`, чтобы точно дать Kiali read-only кластерные права.
+
+
