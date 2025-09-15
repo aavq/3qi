@@ -412,4 +412,32 @@ kubectl get pods -A \
   Добью до рабочей конфигурации.
 
 
+---
 
+
+Here’s a concise **planning meeting speech in English** you can use. I’ve kept it short, clear, and professional, so it fits naturally into a team sync:
+
+---
+
+**Planning update (last 2 weeks):**
+
+In the past two weeks, I’ve mainly focused on two areas:
+
+1. **Kiali upgrade** – I upgraded our Kiali instance from version 2.5 to 2.15. During the migration I also reviewed and fixed the configuration:
+
+   * Corrected the `istio_labels` block to include both `app_label_name` and `version_label_name`, so workloads are now properly discovered.
+   * Cleaned up unused operator-specific keys in the ConfigMap and removed the `discovery_selectors`, which were not relevant for our setup.
+   * Verified RBAC permissions and checked that workloads now appear correctly in the UI.
+
+2. **Training for new TISO role** – I completed onboarding and training sessions related to my new responsibilities as **TISO**. This gave me a better understanding of the expectations for the role and the main processes I’ll be driving.
+
+**Next steps:**
+
+* Monitor Kiali stability in production after the upgrade.
+* Apply the TISO learnings in daily work and start aligning with the team on upcoming priorities.
+
+---
+
+👉 Do you want me to also prepare a **1–2 sentence ultra-short version** (for stand-up style), or keep it in this detailed format?
+
+---
