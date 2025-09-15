@@ -414,30 +414,166 @@ kubectl get pods -A \
 
 ---
 
+Круто, спасибо за скрины. Ниже — «чистый» **config.yaml для Kiali 2.15**, который корректен при **развёртывании без оператора** (т.е. это именно серверный конфиг Kiali, а не CR оператора/Helm-values). Я сохранил твои реальные адреса Prometheus/Jaeger и статус-блок Istio, убрал все операторные ключи и зафиксировал пару меток `app.kubernetes.io/name` + `app.kubernetes.io/version`, чтобы Kiali точно собрал Workloads.
 
-Here’s a concise **planning meeting speech in English** you can use. I’ve kept it short, clear, and professional, so it fits naturally into a team sync:
-
----
-
-**Planning update (last 2 weeks):**
-
-In the past two weeks, I’ve mainly focused on two areas:
-
-1. **Kiali upgrade** – I upgraded our Kiali instance from version 2.5 to 2.15. During the migration I also reviewed and fixed the configuration:
-
-   * Corrected the `istio_labels` block to include both `app_label_name` and `version_label_name`, so workloads are now properly discovered.
-   * Cleaned up unused operator-specific keys in the ConfigMap and removed the `discovery_selectors`, which were not relevant for our setup.
-   * Verified RBAC permissions and checked that workloads now appear correctly in the UI.
-
-2. **Training for new TISO role** – I completed onboarding and training sessions related to my new responsibilities as **TISO**. This gave me a better understanding of the expectations for the role and the main processes I’ll be driving.
-
-**Next steps:**
-
-* Monitor Kiali stability in production after the upgrade.
-* Apply the TISO learnings in daily work and start aligning with the team on upcoming priorities.
+> ВАЖНО: этот файл сам по себе **не даёт прав**. Обязательно нужен ClusterRole/Binding для serviceaccount Kiali (кластерный read-only).
 
 ---
 
-👉 Do you want me to also prepare a **1–2 sentence ultra-short version** (for stand-up style), or keep it in this detailed format?
+```yaml
+# Kiali server config (standalone, no operator)
+# Помести в ConfigMap как data.config.yaml и смонтируй в /opt/kiali/config/config.yaml
+
+auth:
+  strategy: anonymous
+  # если будет OIDC — добавишь блок openid: {...}
+
+logger:
+  log_format: json
+  log_level: info
+  sampler_rate: "1"
+  time_field_format: "2006-01-02T15:04:05Z07:00"
+
+server:
+  port: 20001
+  web_root: /kiali
+  observability:
+    metrics:
+      enabled: true
+      port: 9090
+    tracing:
+      enabled: true
+      collector_type: otel
+      collector_url: simplest-collector.jaeger:4317
+      otel:
+        protocol: grpc
+        tls_enabled: false
+
+login_token:
+  # Секрет для подписи login-токена Kiali (подставь свой)
+  signing_key: "<REPLACE_WITH_RANDOM_32+_CHARS>"
+
+# Если используешь мультикластерные remote-secrets — это как раз серверный блок
+clustering:
+  autodetect_secrets:
+    enabled: true
+    label: kiali.io/multiCluster=true
+
+# Фиксируем СХЕМУ меток, чтобы Workloads точно собирались
+istio_labels:
+  app_label_name: app.kubernetes.io/name
+  version_label_name: app.kubernetes.io/version
+
+kiali_feature_flags:
+  certificates_information_indicators:
+    enabled: true
+    secrets:
+      - cacerts
+      - istio-ca-secret
+  disabled_features: []
+
+ui_defaults:
+  # Просто дефолтный выбор namespace в UI — опционально
+  namespaces:
+    - aces
+    - asm-gateway
+    - fx-client-admin
+    - rms-forge
+    - idc
+
+validations:
+  # Оставил твоё отключение правила
+  ignore:
+    - KIA1301
+
+kubernetes_config:
+  burst: 200
+  qps: 175
+  cache_enabled: true
+  cache_duration: 300
+  cache_expiration: 300
+  cache_token_namespace_duration: 10
+  excluded_workloads:
+    - CronJob
+    - Job
+    - ReplicationController
+  # ничего не исключаем на уровне ресурсов
+  skip_clusters: []
+  skipTLSVerify: false
+
+external_services:
+  istio:
+    # Эти поля сервер читает; остальное (istiod_* и т.п.) авто-обнаружается
+    istio_namespace: istio-system
+    root_namespace: istio-system
+    istio_injection_annotation: sidecar.istio.io/inject
+    istio_sidecar_annotation: sidecar.istio.io/status
+    istio_api_enabled: false
+    envoy_admin_local_port: 15000
+    component_status:
+      components:
+        - app_label: istiod
+          is_core: true
+          is_proxy: false
+        - app_label: istio-ingressgateway
+          namespace: asm-gateway
+          is_core: true
+          is_proxy: true
+        - app_label: istio-eastwestgateway
+          namespace: asm-gateway
+          is_core: false
+          is_proxy: true
+  prometheus:
+    url: "http://prometheus-platform.monitoring:9090"
+  tracing:
+    enabled: true
+    # Для ссылок из UI (внешний адрес Jaeger)
+    external_url: "https://jaeger.anthos-uk-wdc-01.dev.fichc.intranet.db.com"
+    provider: jaeger
+    use_grpc: true
+    grpc_port: 16685
+    # Внутренний адрес (как Kiali ходит в Jaeger Query)
+    internal_url: "http://simplest-query.jaeger:16685"
+  grafana:
+    enabled: false
+```
 
 ---
+
+## Что именно я убрал и почему
+
+* Весь блоки **`deployment.*`**, **`ingress.*`**, **`image_*`**, **`resources/replicas/security_context/node_selector/tolerations/priority_class_name`**, **`service_type`**, **`namespace/instance_name/version_label/view_only_mode`** — это **операторные/helm-ключи**, сервер их не применяет.
+* **`discovery_selectors`** — не нужен в standalone-режиме. Видимость «всех NS» обеспечивается RBAC.
+* **`pod_labels: sidecar.istio.io/inject: "true"`** — не инжектим сайдкар в Kiali (так безопаснее и проще).
+* Лишние «global/commitSha/ticketId/istiohost/kiali\_extras…» — это не серверные ключи.
+
+## Что важно проверить вне конфига
+
+1. **RBAC** для serviceaccount Kiali (кластерный read-only), иначе Workloads будут пустыми:
+
+```bash
+# подставь свой ns и имя SA
+kubectl auth can-i --as=system:serviceaccount:kiali:kiali -A get pods
+kubectl auth can-i --as=system:serviceaccount:kiali:kiali -A list deployments
+kubectl auth can-i --as=system:serviceaccount:kiali:kiali -A watch namespaces
+```
+
+Должно быть **yes** везде. Если нет — выдай ClusterRole/ClusterRoleBinding.
+
+2. **Метки на Pod’ах** соответствуют выбранной паре:
+
+```bash
+kubectl get pods -A \
+  -o custom-columns='NS:.metadata.namespace,POD:.metadata.name,APP:.metadata.labels.app\.kubernetes\.io/name,VER:.metadata.labels.app\.kubernetes\.io/version' \
+  | head -30
+```
+
+Если `APP/VER` пустые — добавь метки в манифесты или смени пару в `istio_labels`.
+
+---
+
+Хочешь — сгенерирую сразу готовый `ConfigMap` и минимальный `ClusterRole/Binding` под этот конфиг.
+
+
+---
+
