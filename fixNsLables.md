@@ -1,1 +1,297 @@
 
+Похоже, речь про **Kiali** (наверное, опечатка «Kerali»). Симптомы «нет ни одного workload» + в логах «label … \[] not found» после апгрейда с 2.5 → 2.15 чаще всего сводятся к 3-м причинам:
+
+1. **Сломалась модель видимости неймспейсов после перехода на Kiali v2**
+2. **Несовпадение схемы меток `app`/`version` с тем, что ожидает Kiali**
+3. **Недостаточные RBAC-права сервис-аккаунта Kiali**
+
+Ниже — короткое объяснение «почему», как быстро проверить и что поправить.
+
+---
+
+# 1) Видимость неймспейсов в Kiali v2: что изменилось и где можно сломаться
+
+С версии **Kiali 2.0** отменены старые ключи наподобие `deployment.accessible_namespaces` и `api.namespaces.*` — они **больше не поддерживаются**. Вместо них используется новая модель: **cluster-wide access** + **discovery selectors** (если хотите ограничивать видимость). По умолчанию Kiali в v2 имеет кластерный доступ и показывает все несистемные неймспейсы.
+
+**Почему это важно именно у вас:**
+Вы ставите Kiali **не через оператор**, а «вручную» (Deployment + ConfigMap). Настройки вроде `deployment.*` — это **поля CR оператора** и на «голый» сервер не действуют. Значит, видимость целиком зависит от **реальных RBAC-прав** сервис-аккаунта и от дефолтного поведения Kiali v2. Если при апгрейде вы оставили старые поля в ConfigMap или «урезали» права (или использовали `Role` вместо `ClusterRole`), Kiali банально не может читать ресурсы — и Workloads пустые.
+
+**Что сделать: быстрая проверка**
+
+```bash
+# ВАЖНО: подставьте свой namespace и имя SA
+kubectl auth can-i --as=system:serviceaccount:istio-system:kiali -A get pods
+kubectl auth can-i --as=system:serviceaccount:istio-system:kiali -A list deployments
+kubectl auth can-i --as=system:serviceaccount:istio-system:kiali -A watch namespaces
+```
+
+Все три должны вернуть **yes**. Если где-то **no** — это ваша первопричина.
+
+**Минимально необходимый ClusterRole (пример)**
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kiali-read-all
+rules:
+- apiGroups: [""]
+  resources: ["pods","replicationcontrollers","services","endpoints","endpointslices","namespaces","nodes","configmaps"]
+  verbs: ["get","list","watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments","replicasets","statefulsets","daemonsets"]
+  verbs: ["get","list","watch"]
+- apiGroups: ["batch"]
+  resources: ["jobs","cronjobs"]
+  verbs: ["get","list","watch"]
+- apiGroups: ["networking.istio.io","security.istio.io","gateway.networking.k8s.io"]
+  resources: ["*"]
+  verbs: ["get","list","watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kiali-read-all
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kiali-read-all
+subjects:
+- kind: ServiceAccount
+  name: kiali
+  namespace: istio-system
+```
+
+Такой кластерный бинд даёт доступ **во все текущие и будущие неймспейсы** без участия оператора — ровно то, что вы хотите. Документация подтверждает, что при установке не через оператор кластерный доступ обязателен.
+
+---
+
+# 2) Метки `app`/`version`: что поменялось и почему логи завалены «…labels not found»
+
+Начиная с **Kiali 2.6**, дефолты `app_label_name`/`version_label_name` изменили на «unset», а Kiali **научился автоматически распознавать** несколько «стандартных пар» меток:
+
+* `service.istio.io/canonical-name` + `service.istio.io/canonical-revision`
+* `app.kubernetes.io/name` + `app.kubernetes.io/version`
+* `app` + `version`
+  (то есть можно **миксовать** эти схемы).
+
+Однако, если у вас в кластере используются **нестандартные** ключи (например, `app_name`, `release`, `build`), то Kiali **не сможет собрать workload’ы** и вы увидите массовые предупреждения/валидации «у сабсета не найдены метки на matching host» (KIA0203) и похожие, т.к. Kiali не находит версии/приложения. Сам факт того, что вы видите в логах бесконечные жалобы на «labels … not found», очень хорошо стыкуется с этой проблемой.
+
+**Что сделать: быстрая проверка**
+
+```bash
+# Посмотреть, какие метки реально есть на Подах:
+kubectl get pods -A \
+  -o custom-columns='NS:.metadata.namespace,POD:.metadata.name,app:.metadata.labels.app,ver:.metadata.labels.version,akn:.metadata.labels.app\.kubernetes\.io/name,akv:.metadata.labels.app\.kubernetes\.io/version,canon:.metadata.labels.service\.istio\.io/canonical-name,crev:.metadata.labels.service\.istio\.io/canonical-revision' \
+  | head -30
+```
+
+Если столбцы `app`/`version` и `app.kubernetes.io/*`/canonical-\* пустуют — Kiali не сможет собрать Workloads.
+
+**Варианты решения**
+
+* Проще всего — **добавить** на Pod’ы одну из поддерживаемых пар меток (минимум `app` и, желательно, `version`) — это и Istio рекомендует.
+* Или **явно указать** Kiali вашу кастомную схему меток в `config.yaml`:
+
+  ```yaml
+  istio_labels:
+    app_label_name: "app.kubernetes.io/name"
+    version_label_name: "app.kubernetes.io/version"
+  ```
+
+  (Эти ключи остались поддерживаемыми; если вы их задаёте, Kiali перестаёт «миксовать» и использует ровно то, что указано).
+
+---
+
+# 3) Случайно «выключили» все контроллеры
+
+Kiali строит Workloads из Deployment/ReplicaSet/StatefulSet/DaemonSet (а RC/Job/CronJob по умолчанию **исключены** ради производительности). Если в `config.yaml` кто-то нечаянно сделал «минус все» в `kubernetes_config.excluded_workloads`, вы действительно увидите «пусто». Проверьте этот блок — по умолчанию туда попадают только RC/Job/CronJob.
+
+---
+
+# 4) Что именно означают ваши логи
+
+Сообщения вида «subset’s labels are not found…» — это валидаторы Kiali (правило **KIA0203**): в `DestinationRule` определены `subsets`, но ни один Pod сервиса не имеет меток этого сабсета. Такое действительно «сыпется» лавиной, если Kiali не видит «правильные» пары меток приложения/версии (см. пункт 2). Это **симптом**, а не первопричина.
+
+---
+
+# 5) Чек-лист «разрулить за 10 минут»
+
+1. **RBAC**: дайте kiali-SA кластерный read-only доступ (пример ClusterRole выше).
+   Быстрый тест: `kubectl auth can-i --as=system:serviceaccount:… -A list pods` → **yes**.
+2. **Метки**: обеспечьте наличие хотя бы одной поддерживаемой пары меток на Pod’ах (`app`+`version` / `app.kubernetes.io/name`+`…/version` / canonical-\*).
+   Либо пропишите `istio_labels.*` в `config.yaml` под вашу схему.
+3. **ConfigMap**: убедитесь, что в `kubernetes_config.excluded_workloads` вы случайно не исключили Deployment/StatefulSet/DaemonSet.
+4. **Логи Kiali**: поднимите уровень логирования и проверьте стартовые строки — там видны применённые настройки (и ошибки прав/доступности).
+5. (Опционально) **Prometheus** нужен для Graph/метрик, но не для списка Workloads. Если Workloads появятся, а граф останется пустым — уже смотреть `external_services.prometheus.*`.
+
+---
+
+## Готовый «минимальный» `config.yaml` для Kiali 2.15 (manual install), без оператора
+
+> Работает при наличии ClusterRoleBinding как выше. Это безопасная база: workloads видны во всех неймспейсах, метки «миксуются» по умолчанию Kiali 2.6+, лишнего нет.
+
+```yaml
+server:
+  port: 20001
+auth:
+  strategy: anonymous  # или ваш OpenID/SO
+external_services:
+  istio:
+    istio_namespace: istio-system
+  prometheus:
+    url: "http://prometheus.istio-system:9090"  # при необходимости
+kubernetes_config:
+  # НЕ исключаем ключевые контроллеры:
+  excluded_workloads:
+    - "ReplicationController"
+    - "Job"
+    - "CronJob"
+# Если у вас НЕ стандартные метки, раскомментируйте:
+# istio_labels:
+#   app_label_name: "app.kubernetes.io/name"
+#   version_label_name: "app.kubernetes.io/version"
+```
+
+---
+
+## Почему после апгрейда всё «вдруг» посыпалось?
+
+* Вы перешли на ветку **Kiali v2**, где **устаревшие ключи** для неймспейсов полностью убраны.
+* В **2.6** поменялась логика дефолтных меток (теперь по умолчанию Kiali «миксуёт» несколько пар) — это обнаруживает ошибки/нестандартные схемы ярче, чем раньше.
+* Если права у kiali-SA были ограничены на уровне конкретных NS (через `Role`/`RoleBinding`), новая схема больше не «расширяется» оператором (вы его не используете), поэтому **новые неймспейсы** и правда не видны.
+
+---
+
+Если после применения RBAC и проверки меток список Workloads всё ещё пустой — дайте 2 вещи:
+
+1. кусок вашего `config.yaml` Kiali;
+2. выхлоп `kubectl auth can-i ...` из блока проверки.
+   Разберём до винтика.
+
+
+
+___
+
+
+Отличные вопросы. Сведу всё, что важно для **Kiali 2.15** (ветка v2.x), с примерами и ссылками.
+
+# 1) Какие поля **нельзя** держать в конфиге на v2.15
+
+В v2.x Kiali окончательно отказался от старой модели «доступные/видимые неймспейсы» через include/exclude. Эти поля **удалены** и должны быть убраны из вашего `config.yaml` (или из CR, если вы когда-то мигрируете на оператор):
+
+* `deployment.accessible_namespaces`
+* `api.namespaces.include`
+* `api.namespaces.exclude`
+* `api.namespaces.label_selector_include`
+* `api.namespaces.label_selector_exclude` ([Kiali][1])
+
+Также в ветке 2.14+ появились новые «no longer used / auto-discovered» поля. Если вы когда-нибудь будете использовать **Kiali CR** (оператор), их нужно удалить именно из **CR** (в обычном `config.yaml` Kiali Server они и так не работают, но лучше не тащить мусорные ключи):
+
+* (no longer used) `spec.istio_namespace`, `spec.in_cluster`, `spec.deployment.remote_secret_path`
+* (auto-discovered, больше не задаются руками) `spec.external_services.istio.{config_map_name, istiod_deployment_name, istiod_pod_monitoring_port, envoy_admin_local_port, istio_canary_version, istio_injection_annotation, istio_sidecar_annotation, url_service_version}` ([Kiali][2])
+
+Наконец, в v2.12 прекратилась поддержка старого графа Cytoscape и настройки
+`kiali_feature_flags.ui_defaults.graph.impl` — её тоже не должно быть. ([Kiali][2])
+
+# 2) Discovery selectors: какие значения, чтобы «видны все namespaces»
+
+Поведение зависит от **cluster\_wide\_access**:
+
+* **Самый простой и правильный для “все ns” способ при ручной установке (без оператора):**
+  держите `deployment.cluster_wide_access: true` и **не задавайте** discovery selectors вовсе (или оставьте пустой список). Тогда Kiali покажет **все** неймспейсы, *кроме* системных (`kube-*`, `openshift-*`, `ibm-*`) — они специально скрываются по умолчанию. ([Kiali][1])
+
+  Минимальный фрагмент `config.yaml`:
+
+  ```yaml
+  deployment:
+    cluster_wide_access: true
+  # discovery_selectors: []  # просто не указывайте
+  ```
+
+  (Так и делает официальный пример — `cluster_wide_access: true` в конфиге Kiali Server. ([GitHub][3]))
+
+* **Если хотите видеть ещё и системные ns** — добавьте **label-based** селекторы, которые их включат:
+
+  1. пометьте нужные системные ns меткой, например `kiali.io/visible=true`;
+  2. добавьте селектор:
+
+  ```yaml
+  deployment:
+    cluster_wide_access: true
+    discovery_selectors:
+      default:
+        - matchLabels:
+            kiali.io/visible: "true"
+  ```
+
+  Тогда Kiali перестанет использовать «исключение системных по умолчанию» и будет ровно следовать вашим селекторам. ([Kiali][1])
+
+> Важно: **Kiali не использует** Istio discovery selectors. Если у Istio они настроены, обычно имеет смысл **синхронизировать** список и в Kiali вручную (через его discovery selectors), но это независимые механизмы. ([Kiali][1])
+
+# 3) С чем взаимодействуют discovery selectors (логика и «подводные камни»)
+
+* **`deployment.cluster_wide_access` (главное!)**
+
+  * `true` (рекомендовано при ручной установке без оператора): Kiali имеет **кластерные** права. Discovery selectors в этом режиме работают как **фильтр видимости** (перформанс-оптимизация), а доступ остаётся кластерным. Пустой список ⇒ видны все несистемные ns. ([Kiali][1])
+  * `false` (обычно только при установке через оператор): доступ даётся **только** на ns, совпавшие с discovery selectors (оператор создаёт Role/RoleBinding на каждый ns). Пустой список ⇒ доступны лишь ns Kiali и ns контрольного плейна Istio. ([Kiali][1])
+
+* **Способ установки**
+  При установке **без оператора** (ваш случай, ConfigMap) Kiali не умеет сам создавать Roles на каждый ns, поэтому практически обязателен режим `cluster_wide_access: true`. (Helm-серверный чарт тоже поддерживает только cluster-wide). ([Kiali][1])
+
+* **Operator Namespace Watching / reconcile** (актуально, если когда-нибудь перейдёте на оператор)
+  При `cluster_wide_access: false` новые ns станут видимы только после reconcile оператора (периодически/по событию). ([Kiali][1])
+
+* **Мультикластер**
+  Есть `deployment.discovery_selectors.overrides` — отдельные списки селекторов для удалённых кластеров; они полностью **заменяют** `default` для конкретного кластера. ([Kiali][1])
+
+* **Per-user RBAC**
+  Селекторы определяют «какие ns может видеть Kiali в принципе», но что увидит **конкретный пользователь**, дополнительно ограничивает кластерный RBAC (Roles/ClusterRoles + Bindings). ([Kiali][4])
+
+* **Несколько Kiali с cluster-wide**
+  Если поднимете несколько инстансов с `cluster_wide_access: true`, им нужны **уникальные** `deployment.instance_name`. ([Kiali][1])
+
+---
+
+## Готовые минимальные шаблоны
+
+**A. Ручная установка (ConfigMap Kiali Server), “видны все ns” кроме системных**
+
+```yaml
+deployment:
+  cluster_wide_access: true
+# discovery_selectors: []  # не указываем
+```
+
+([Kiali][1])
+
+**B. То же + включить выбранные системные ns**
+
+```yaml
+deployment:
+  cluster_wide_access: true
+  discovery_selectors:
+    default:
+      - matchLabels:
+          kiali.io/visible: "true"  # поставьте эту метку на нужные системные ns
+```
+
+([Kiali][1])
+
+---
+
+### Короткая проверка вашего файла
+
+1. Убедитесь, что **нет** `deployment.accessible_namespaces` и любых `api.namespaces.*`. ([Kiali][1])
+2. Для ручной установки держите `deployment.cluster_wide_access: true`. ([Kiali][1])
+3. Если хотите «все ns» — просто не задавайте discovery selectors; если нужны системные, добавьте label-селектор под них. ([Kiali][1])
+
+Если покажете свой текущий `config.yaml`, быстро укажу конкретные строки, что удалить/заменить.
+
+[1]: https://kiali.io/docs/configuration/namespace-management/ "Namespace Management | Kiali"
+[2]: https://kiali.io/news/release-notes/ "Release Notes | Kiali"
+[3]: https://raw.githubusercontent.com/istio/istio/release-1.25/samples/addons/kiali.yaml?utm_source=chatgpt.com "https://raw.githubusercontent.com/istio/istio/rele..."
+[4]: https://kiali.io/docs/configuration/rbac/ "Namespace access control | Kiali"
+
+---
+
