@@ -178,3 +178,106 @@ Kiali использует **Authorization Code Flow** и по умолчани�
 ---
 ---
 
+
+Вот готовый черновик письма. Я оставил плейсхолдеры в угловых скобках — просто подставь свои значения.
+
+---
+
+**Subject:** Request to verify OIDC client configuration for Kiali (Client ID: `<CLIENT_ID>`)
+
+**Hi CIDP team,**
+
+We are integrating **Kiali** with our corporate IdP via **OIDC Authorization Code** flow and are seeing an authentication failure that appears to happen **on the IdP side before the redirect back to Kiali**.
+
+**What’s configured on our side (Kiali):**
+
+* Auth strategy: **openid** (Authorization Code flow).
+* `issuer_uri`: `<ISSUER_ISSUER_URL>` (realm/tenant used for this client).
+* `client_id`: `<CLIENT_ID>`.
+* `client_secret`: stored in the `kiali` secret (key `oidc-secret`) in the install namespace.
+* `scopes`: currently requesting `openid profile email` (can reduce to `openid` if needed).
+* `redirect_uri`: `https://<KIALI_HOST>/kiali` (exact match, no trailing slash).
+* Kiali is published via `<INGRESS/ISTIO GATEWAY/LOAD-BALANCER>`, forwarding `X-Forwarded-Proto/Host/Port`.
+
+**Observed symptoms:**
+
+* After I enter credentials on the CIDP login page, the browser console shows **401** on IdP endpoints like:
+
+  * `authenticate?goto=<...>`
+  * `sessions?_action=getSessionInfo` (multiple times)
+* No redirect back to Kiali occurs; Kiali then shows **“login failed”**.
+* Kiali logs include:
+
+  * `Could not read the session: session not found: cookie kiali-token-... does not exist in request`
+  * `Configured OpenID provider informs some of the configured scopes are unsupported. Users may not be able to login.`
+* After several attempts I see **“Warning: You will be locked out after N more failure(s)”** on the IdP page.
+
+This looks like the IdP login flow isn’t completing (no SSO session or it isn’t recognized), or my user isn’t authorized for this client, so the browser never gets redirected back with a code.
+
+**Could you please check and confirm the following for `<CLIENT_ID>` and my user `<MY_UPN/LOGIN>`:**
+
+1. **Client registration / metadata**
+
+* The **Redirect URIs** include exactly: `https://<KIALI_HOST>/kiali` (character-for-character; scheme/host/port/path; no trailing slash).
+* **Response type** `code` (Authorization Code) is allowed; **response mode** `query` (and/or `form_post`) is allowed.
+* **Token endpoint auth method** permitted for this client (`client_secret_basic` and/or `client_secret_post`).
+* Whether **PKCE (S256)** is required for this client.
+* The discovery endpoints for this realm/tenant (authorize/token/jwks) used by this client.
+
+2. **User assignment / entitlements**
+
+* Is my user **assigned/entitled** to this application/client (or a group that is allowed)?
+* If your platform has “user assignment required” or similar, please confirm my account is assigned and allowed to obtain tokens for `<CLIENT_ID>`.
+* Confirm the **realm/journey** used for authentication and that there’s no conditional policy (MFA step, IP policy, group condition, attribute requirement) blocking my user.
+
+3. **Scopes and claims**
+
+* Which **scopes** are allowed for `<CLIENT_ID>`? Are `openid`, `profile`, `email` all supported?
+* If some scopes are **unsupported**, please specify the allowed minimal set (we can switch to `openid` only).
+* Which **ID token claims** will be present (`sub`, `email`, `groups`, etc.)? If group claims are available, what is their claim name/format?
+
+4. **Session / cookies during login page**
+
+* After successful primary auth, does the IdP set its **SSO/session cookie** (name and attributes)?
+* Please confirm its attributes support cross-site redirects (**`SameSite=None; Secure`**), so the subsequent calls like `sessions?_action=getSessionInfo` don’t return 401 due to the cookie being dropped by the browser.
+* Is the **`goto`** target host `https://<KIALI_HOST>` allowed by your policies/whitelist?
+
+5. **Audit / error details for my recent attempts**
+
+* For my attempts at approximately `<DATE TIME TZ>`, could you provide the audit entries or the **exact error** (reason string / policy node) returned by the IdP that leads to the 401 on `authenticate`/`sessions`?
+* If the flow reached authorization and a **code** was issued, did you see a subsequent **/token** request from Kiali? If yes, what was the result/status, and was there any error such as `invalid_client`, `unauthorized_client`, or `invalid_grant`?
+
+6. **Lockout policy**
+
+* Because I am now close to lockout, could you **reset/relax** the lockout for my account during troubleshooting or provide a **temporary test account** that is known to be assigned to `<CLIENT_ID>`?
+
+If you confirm the items above (especially user assignment, allowed scopes, redirect/goto whitelist, cookie attributes, and the client’s token auth method), I can immediately re-test and, if needed, adjust our side (e.g., scopes and headers like `X-Forwarded-Proto/Host/Port`).
+
+Thank you!
+
+Best regards,
+`<Your Name>`
+`<Team / Project>`
+`<Contact>`
+
+---
+
+### Notes for you (не отправлять в письмо)
+
+* Kiali поддерживает только **Authorization Code** flow и по умолчанию использует `openid profile email`; redirect обычно `https://<host>/kiali`. ([kiali.io][1])
+* 401 на `sessions?_action=getSessionInfo` и `authenticate?goto=` типичны для ForgeRock/PingAM-подобных IdP, когда **SSO-cookie не установилась/не вернулась** или пользователь не авторизован на приложение. ([backstage.forgerock.com][2])
+* Для кросс-сайтовых сценариев важно, чтобы SSO-cookie IdP имела **`SameSite=None; Secure`** — иначе браузер её не пошлёт на следующие REST-вызовы, и IdP ответит 401. ([Google for Developers][3])
+* В системах вроде Entra ID «**User assignment required**» блокирует выдачу токена, если пользователь/группа не назначены на приложение. ([Microsoft Learn][4])
+
+Хочешь, адаптирую письмо под конкретные значения (`<CLIENT_ID>`, точные время/URL, realm, скриншоты из DevTools) — просто кинь их сюда, и я быстро подставлю.
+
+[1]: https://kiali.io/docs/configuration/authentication/openid/?utm_source=chatgpt.com "OpenID Connect strategy"
+[2]: https://backstage.forgerock.com/docs/am/7.1/sessions-guide/managing-sessions-REST.html?utm_source=chatgpt.com "Managing Sessions (REST) - ForgeRock Backstage"
+[3]: https://developers.google.com/search/blog/2020/01/get-ready-for-new-samesitenone-secure?utm_source=chatgpt.com "Get Ready for New SameSite=None; Secure Cookie Settings"
+[4]: https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/application-properties?utm_source=chatgpt.com "Properties of an enterprise application - Microsoft Entra ID"
+
+---
+---
+---
+
+
