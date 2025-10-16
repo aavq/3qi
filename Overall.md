@@ -34,3 +34,36 @@
 5. **Документация**: введён единый стандарт, материалы переведены на управление версиями и автоматическую сборку; обновления проходят через устойчивый процесс.
 
 **Результат:** цели достигнуты, контур стабилен, создана база для дальнейшего масштабирования.
+
+
+---
+---
+---
+
+
+Вот «обтекаемая», убедительная версия на английском для секции HOW — без конкретики, но со звучащими «примерными» примерами. В конце — короткий ответ на вопрос про соответствие стандартам.
+
+# HOW – Overall Behaviour (Self-reflection)
+
+**Summary**
+Across the year I consistently demonstrated the behavioural standards expected in our aspirational culture. I focused on outcomes, acted with ownership, collaborated openly, and maintained a strong control mindset. The approaches below were applied throughout major platform and process initiatives.
+
+**1) Put clients & outcomes first**
+Kept stakeholder needs at the centre, translating them into clear deliverables and decision points. Made trade-offs explicit, communicated progress regularly, and adjusted plans when priorities shifted to protect the agreed outcomes.
+
+**2) Ownership & disciplined delivery**
+Took end-to-end responsibility—from scoping and planning to execution and follow-through. Proactively unblocked issues, documented decisions, and closed feedback loops. When risks to timelines emerged, I escalated early and aligned on pragmatic, outcome-based adjustments.
+
+**3) Collaboration & inclusion**
+Worked transparently with partner teams, creating shared artefacts and forums for alignment. Facilitated constructive debates, incorporated diverse perspectives, and supported knowledge transfer (e.g., concise handovers, quick reference guides) to make progress sustainable beyond individual contributors.
+
+**4) Integrity, risk & controls mindset**
+Embedded secure-by-default and compliant practices in daily work. Raised concerns early, ensured peer reviews and auditable change paths, and favoured incremental rollouts with monitoring and clear rollback options—prioritising long-term reliability over short-term speed.
+
+**Looking ahead**
+I will continue to simplify communication flows, surface assumptions earlier, and extend automation of repeatable tasks to reduce operational toil.
+
+**Does the employee demonstrate the expected behavioural standards?**
+**Yes.** Behaviour has been consistent with expectations across the year, with notable strengths in accountability, cross-team collaboration, and maintaining a strong control mindset.
+
+
