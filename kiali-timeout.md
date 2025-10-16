@@ -167,3 +167,163 @@ spec:
 * и 10–15 строк логов из `deploy/kiali` вокруг ошибки,
 
 — я смогу точечно указать, где именно «стрелка» и дать готовые патчи под ваш вариант (Operator/Helm).
+
+
+---
+---
+---
+
+Окей, это вторая независимая проблема: Kiali не может сопоставить Pod с «workload’ом» типа **ReplicaSet** и ругается `Workload <POD_NAME> is not found as ReplicaSet`. Такое бывает, когда Pod не управляется ReplicaSet’ом (или RS отсутствует/недоступен), либо Kiali по конфигу/правам не видит соответствующий объект.
+
+Ниже — пошаговая диагностика и готовые фиксы.
+
+# 1) Быстро понять, чем управляется Pod
+
+```bash
+NS=<namespace>
+POD=<pod-name>
+
+# Кто владелец Pod’а?
+kubectl -n $NS get pod $POD -o jsonpath='{.metadata.ownerReferences[*].kind}{" "}{.metadata.ownerReferences[*].name}{"\n"}'
+```
+
+Дальше по веткам:
+
+## Ветка A: пусто (нет ownerReferences)
+
+Это «голый» Pod (kubectl run --restart=Never и т.п.).
+**Что делать:** оформить как нормальный контроллер — Deployment/StatefulSet/Job. Kiali не будет считать «голые» Pod’ы workload’ами.
+
+## Ветка B: `Job`/`CronJob`
+
+Pod управляет Job/CronJob, а не ReplicaSet.
+**Что делать:** это штатно. Сообщение в логе появляется, потому что Kiali пробует RS, не находит и идёт дальше. Если шумно — можно:
+
+* убедиться, что Pod/Job имеет стандартные метки `app.kubernetes.io/name`, `version` — Kiali лучше группирует;
+* обновить Kiali конфиг, чтобы не ограничивать workloads по специфичным лейблам (см. п.4);
+* оставить как есть — на работу не влияет.
+
+## Ветка C: `ReplicaSet <rs-name>`
+
+Проверяем, существует ли RS и к нему доступ:
+
+```bash
+OWNER=$(kubectl -n $NS get pod $POD -o jsonpath='{.metadata.ownerReferences[0].name}')
+kubectl -n $NS get rs $OWNER -o wide
+```
+
+* **NotFound** → Pod «сирота»: RS удалён (например, кто-то удалил его с `--cascade=orphan`).
+  **Фикс:** удалите/пересоздайте Pod (или задеплойте заново Deployment). Для устойчивости — не удаляйте активный RS руками.
+* **403 Forbidden** → у ServiceAccount Kiali нет прав читать RS в этом ns.
+  **Фикс (RBAC):**
+
+  ```bash
+  SA_NS=kiali-system
+  SA=kiali-service-account # проверьте точное имя
+  kubectl auth can-i list replicasets -n $NS --as=system:serviceaccount:$SA_NS:$SA
+  ```
+
+  Если `no`, добавьте роль/rolebinding (пример):
+
+  ```yaml
+  apiVersion: rbac.authorization.k8s.io/v1
+  kind: Role
+  metadata: {name: kiali-rs-reader, namespace: <NS>}
+  rules:
+  - apiGroups: ["apps"]
+    resources: ["replicasets","deployments","statefulsets","daemonsets","jobs","cronjobs"]
+    verbs: ["get","list","watch"]
+
+  ---
+  apiVersion: rbac.authorization.k8s.io/v1
+  kind: RoleBinding
+  metadata: {name: kiali-rs-reader-binding, namespace: <NS>}
+  subjects:
+  - kind: ServiceAccount
+    name: <kiali-sa-name>
+    namespace: kiali-system
+  roleRef:
+    apiGroup: rbac.authorization.k8s.io
+    kind: Role
+    name: kiali-rs-reader
+  ```
+
+# 2) Если Pod должен быть под Deployment
+
+Иногда RS есть, но Kiali не находит соответствующий **workload** из-за «агрессивного» label-selector’а в конфиге Kiali или из-за исключений по namespace.
+
+## Проверьте конфиг Kiali
+
+```bash
+kubectl -n kiali-system get cm kiali -o yaml | yq '.data."config.yaml"'
+# или, если через CR:
+kubectl -n kiali-system get kiali -o yaml
+```
+
+Ищем:
+
+* `kubernetes_config.label_selector` — если задан (например, `"app,app.kubernetes.io/name"`), то **workload считается валидным только при наличии хотя бы одного из этих лейблов** на контроллере.
+  **Фиксы:**
+
+  * добавить соответствующие лейблы на Deployment/StatefulSet (предпочтительнее, best practice),
+  * либо временно убрать/смягчить `label_selector` в конфиге Kiali/CR.
+
+* `api.namespaces.exclude/include` или `deployment.accessible_namespaces` — если ns исключён/не в списке, Kiali может не кэшировать workloads.
+  **Фикс:** включить нужный namespace.
+
+После правок — перезапустите Kiali:
+
+```bash
+kubectl -n kiali-system rollout restart deploy/kiali
+```
+
+# 3) Случай с «осиротевшими» Pod’ами (часто при ручных действиях)
+
+Признаки: RS удалён, Pod живёт.
+**Решение:**
+
+```bash
+kubectl -n $NS delete pod $POD
+# или откат/перевыкат Deployment:
+kubectl -n $NS rollout restart deploy/<name>
+```
+
+Чтобы меньше попадать в такую ситуацию:
+
+* не удаляйте активные RS вручную,
+* не используйте orphan-каскад без необходимости,
+* держите `revisionHistoryLimit` > 1, чтобы диагностировать состояние релизов.
+
+# 4) Быстрые проверки, которые закрывают 80% кейсов
+
+```bash
+# 1) OwnerReferences
+kubectl -n $NS get pod $POD -o jsonpath='{.metadata.ownerReferences[*].kind}{" "}{.metadata.ownerReferences[*].name}{"\n"}'
+
+# 2) Если RS — он существует?
+OWNER=$(kubectl -n $NS get pod $POD -o jsonpath='{.metadata.ownerReferences[0].name}')
+kubectl -n $NS get rs $OWNER -o name
+
+# 3) RBAC из-под аккаунта Kiali
+SA_NS=kiali-system; SA=<kiali-sa-name>
+kubectl auth can-i get replicasets -n $NS --as=system:serviceaccount:$SA_NS:$SA
+
+# 4) Kiali label_selector / включение namespace
+kubectl -n kiali-system get cm kiali -o yaml | yq '.data."config.yaml"'
+```
+
+# 5) Важное про «вечный спиннер»
+
+Спиннер около логотипа — почти всегда «висящие» health-чеки внешних сервисов (у вас Jaeger, смежная тема). Ошибка про ReplicaSet **сама по себе** спиннер обычно не вызывает; но лучше приглушить шум логов, устранив причины выше.
+
+---
+
+Если скинете:
+
+* `kubectl -n <ns> get pod <pod> -o yaml | head -n 80` (хватит метаданных с ownerReferences/labels),
+* `kubectl -n <ns> get rs <owner> -o yaml | head -n 40` (или факт его отсутствия),
+* фрагмент `config.yaml` Kiali (kubernetes_config, api.namespaces, external_services),
+
+— дам точный патч (RBAC/labels/CR) под ваш случай.
+
+
