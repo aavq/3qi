@@ -67,3 +67,20 @@ I will continue to simplify communication flows, surface assumptions earlier, an
 **Yes.** Behaviour has been consistent with expectations across the year, with notable strengths in accountability, cross-team collaboration, and maintaining a strong control mindset.
 
 
+
+---
+---
+---
+
+
+**HOW – Overall Behaviour (Concise self-reflection)**
+
+* **Act responsibly to inspire trust:** Consistently behaved with integrity and ownership; raised issues early and listened to concerns; evaluated risks and controls before decisions and after changes.
+* **Think commercially for sustainable outcomes:** Kept client experience central; considered long-term impacts; prioritised effort on highest-value work; acted thoughtfully and decisively when trade-offs were needed.
+* **Take initiative to create solutions:** Identified opportunities, challenged inefficient steps, and simplified processes; empowered colleagues to decide and move fast within clear guardrails.
+* **Work collaboratively for the greatest impact:** Welcomed diverse views and ran open dialogues; solved problems in partnership; recognised team contributions and treated everyone fairly.
+
+**Does the employee demonstrate the expected behavioural standards?**
+**Yes — consistently throughout the year.**
+
+
