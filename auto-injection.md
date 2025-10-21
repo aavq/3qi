@@ -151,3 +151,166 @@ kubectl annotate kiali kiali -n kiali --overwrite trigger-reconcile="$(date)"
 ---
 ---
 ---
+
+
+Коротко: **нет, одного `cluster_wide_access: true` в ConfigMap недостаточно, чтобы «само починилось»**, если в кластере сломаны/неверные RBAC-биндинги.
+Для standalone Helm-установки (`kiali/kiali-server`) нужно одновременно:
+
+1. **Корректные кластерные роли/биндинги** для SA Kiali.
+2. (Опционально для авто-фильтрации) **`deployment.discovery_selectors`** — чтобы Kiali показывал только те NS, где есть Istio.
+3. **Control plane NS должен попадать под ваши селекторы** (в Kiali v2 это новое требование). ([kiali.io][1])
+
+---
+
+# Что именно должно быть в кластере (standalone Helm, без оператора)
+
+При установке из **`kiali/kiali-server`** чарт **создаёт** (по умолчанию):
+
+* `ServiceAccount`: `kiali` в вашем ns (например, `kiali`).
+* `ClusterRole`: `kiali` (широкий read, плюс операции на Istio-ресурсах, port-forward, pods/log и т.п.).
+* `ClusterRoleBinding`: `kiali` → субъект **`system:serviceaccount:kiali:kiali`**.
+* `Role` в ns control plane (обычно `istio-system`) для доступа к секретам (CA),
+* `RoleBinding` в ns control plane, который биндит **SA из ns Kiali** к этой Role.
+  Это видно как в шаблонах server-чарта/исторических манифестах, так и по поведению чарта (в т.ч. режим `view_only_mode` биндит viewer-роль через Helm). ([GitHub][2])
+
+> Важно: **Server-chart не создаёт per-namespace Roles по селекторам** — он полагается на **cluster-wide** доступ, а селекторы лишь **ограничивают, что видно в UI**. Для per-NS RBAC нужны были бы возможности оператора (у вас он принципиально не используется). ([kiali.io][3])
+
+---
+
+# Проверка и типовые «поломки» RBAC
+
+1. **Правильный subject в ClusterRoleBinding**
+   Частая ошибка — биндят на SA **в неверном namespace** (например, `istio-system` вместо `kiali`).
+
+```bash
+kubectl get clusterrolebinding kiali -o yaml | grep -A5 subjects:
+# Должно быть:
+# kind: ServiceAccount
+# name: kiali
+# namespace: kiali   # <-- ваш ns установки Kiali
+```
+
+2. **RoleBinding в ns control plane** (доступ к секретам и т.п.)
+
+```bash
+kubectl get rolebinding -n istio-system kiali-controlplane -o yaml | grep -A6 subjects:
+# namespace в subject тоже должен быть "kiali"
+```
+
+3. **Убедиться, что Deployment реально использует нужный SA**
+
+```bash
+kubectl get deploy -n kiali kiali -o jsonpath='{.spec.template.spec.serviceAccountName}{"\n"}'
+# Ожидаем: kiali
+```
+
+4. **Проверить ключевые разрешения от имени SA**
+
+```bash
+# SA Kiali должен уметь читать список NS, иначе селекторы не сработают вообще
+kubectl auth can-i --as=system:serviceaccount:kiali:kiali list namespaces
+
+# Чтение Istio CRDs
+kubectl auth can-i --as=system:serviceaccount:kiali:kiali list virtualservices.networking.istio.io -A
+kubectl auth can-i --as=system:serviceaccount:kiali:kiali list destinationrules.networking.istio.io -A
+
+# (Если используете Gateway API)
+kubectl auth can-i --as=system:serviceaccount:kiali:kiali list gateways.gateway.networking.k8s.io -A
+```
+
+> Если `can-i list namespaces` возвращает `no` — Kiali **не сможет** обработать discovery-selectors. ([GitHub][4])
+
+---
+
+# Настройки Helm/ConfigMap, которые должны быть
+
+## 1) RBAC на уровне чарта (обычно по умолчанию уже есть)
+
+Ничего «в Deployment» менять не нужно — права задаёт **RBAC** (ClusterRole/Binding), а не сам pod. Но проверьте, что вы **не** включали что-то, что урезает RBAC, например только viewer-доступ, если вам нужны правки из UI.
+
+```yaml
+# values.yaml (фрагмент)
+deployment:
+  cluster_wide_access: true        # необходимо для server-чарта
+  # Если хотите read-only:
+  # view_only_mode: true
+```
+
+Смысл `cluster_wide_access: true`: чарту «можно» создать ClusterRole/ClusterRoleBinding. Это даёт Kiali **доступ**, а не «фильтр видимости». Фильтрацию даёт следующий пункт. ([kiali.io][5])
+
+## 2) Авто-фильтрация видимых NS (динамически) через discovery selectors
+
+Чтобы Kiali **показывал только те NS, где действительно есть Istio-нагрузки** — добавьте селекторы. И **обязательно включите ns control plane** в эти селекторы (или промаркируйте его отдельно).
+
+```yaml
+# values.yaml (фрагмент)
+deployment:
+  cluster_wide_access: true
+  discovery_selectors:
+    default:
+      # classic auto-injection
+      - matchLabels:
+          istio-injection: "enabled"
+      # revision-based auto-injection
+      - matchExpressions:
+        - key: istio.io/rev
+          operator: Exists
+      # Явно включим control plane namespace через отдельную метку:
+      - matchLabels:
+          kiali-access: "controlplane"
+```
+
+И промаркируйте control plane ns (если он не совпадает с двумя правилами выше):
+
+```bash
+kubectl label ns istio-system kiali-access=controlplane --overwrite
+```
+
+* В Kiali v2 **поддержка старых полей** типа `accessible_namespaces` удалена — нужны **discovery selectors**. ([v2-0.kiali.io][6])
+* **Control plane ns обязан попадать в селекторы** (требование новых версий/релиз-ноты). ([kiali.io][7])
+
+> После изменения ConfigMap/values не забудьте перезапустить pod Kiali:
+
+```bash
+kubectl rollout restart deploy -n kiali kiali
+```
+
+---
+
+# Ответы на ваши вопросы «да/нет»
+
+* **«Этого достаточно — `cluster_wide_access: true`?»**
+  Нет, это **не чинит** возможные ошибки RBAC и **не ограничивает видимость**. Это лишь разрешает чарту создать кластерные права. Если RBAC/биндинги неверные — нужно их поправить. Если нужна динамическая фильтрация — добавьте `discovery_selectors`. ([kiali.io][5])
+
+* **«Должно ли что-то меняться в самом Deployment?»**
+  Нет. Деплоймент должен просто ссылаться на корректный `serviceAccountName`. Все «права» живут в ClusterRole/Role(Binding). См. проверки выше.
+
+* **«В Helm-чарте есть всё необходимое по кластерным ролям?»**
+  Да, официальный **`kiali/kiali-server`** ставит SA, ClusterRole, ClusterRoleBinding и нужные роли/биндинги в control plane NS. Если их нет/они указывают на неверный namespace — это симптом локальной модификации/ручного редактирования или неприменённых шаблонов. ([GitHub][2])
+
+---
+
+# Быстрый чек-лист исправления
+
+1. Исправьте/создайте правильные биндинги:
+
+   * `ClusterRoleBinding kiali` → `system:serviceaccount:kiali:kiali`.
+   * `RoleBinding kiali-controlplane` в ns control plane → тот же субъект.
+2. Убедитесь, что `Deployment kiali` использует SA `kiali`.
+3. Включите селекторы (`deployment.discovery_selectors`) + включите ns control plane (через метку или отдельное правило).
+4. `rollout restart` Kiali.
+5. Повторите `kubectl auth can-i …` для ключевых API (namespaces, istio CRDs, gateway API при необходимости).
+
+Если пришлёшь `kubectl get clusterrolebinding kiali -o yaml` и `… rolebinding -n istio-system kiali-controlplane -o yaml`, я укажу, что именно нужно поправить в твоём кластере.
+
+[1]: https://kiali.io/docs/configuration/rbac/?utm_source=chatgpt.com "Namespace access control"
+[2]: https://raw.githubusercontent.com/istio/istio/release-1.15/samples/addons/kiali.yaml?utm_source=chatgpt.com "https://raw.githubusercontent.com/istio/istio/rele..."
+[3]: https://kiali.io/docs/configuration/namespace-management/?utm_source=chatgpt.com "Namespace Management"
+[4]: https://github.com/kiali/kiali/issues/7546?utm_source=chatgpt.com "Enhance namespace accessibility based on ..."
+[5]: https://kiali.io/docs/faq/general/?utm_source=chatgpt.com "General"
+[6]: https://v2-0.kiali.io/news/release-notes/?utm_source=chatgpt.com "Release Notes"
+[7]: https://kiali.io/news/release-notes/?utm_source=chatgpt.com "Release Notes"
+
+---
+---
+---
