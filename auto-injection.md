@@ -314,3 +314,142 @@ kubectl rollout restart deploy -n kiali kiali
 ---
 ---
 ---
+
+
+Коротко: **RoleBinding `kiali-controlplane` в `istio-system` должен был создать сам Helm-чарт `kiali/kiali-server` при `helm install/upgrade`.** Он идёт вместе с `Role kiali-controlplane` в `istio-system` и биндит **ServiceAccount `kiali` из namespace установки Kiali** к этой роли. Если его нет — либо чарт ставили/обновляли с ограничениями по RBAC, либо релиз/NS меняли и биндинг «потерялся», либо используется не тот чарт/значения. ([GitHub][1])
+
+### Когда и кем добавляется этот RoleBinding
+
+* **Кем:** Helm-релиз `kiali-server` (официальный server-чарт Kiali).
+* **Когда:** во время `helm install`/`helm upgrade` Kiali. В шаблонах чарта есть:
+
+  * `ClusterRole kiali` + `ClusterRoleBinding kiali` (кластерные права для SA Kiali),
+  * **`Role kiali-controlplane` в `istio-system`** (доступ к секретам control plane),
+  * **`RoleBinding kiali-controlplane` в `istio-system`**, subject → `system:serviceaccount:<NS_KIALI>:kiali`. ([GitHub][1])
+
+> Примечание: для server-чарта **cluster-wide режим обязателен** (`deployment.cluster_wide_access=true`) — он даёт права; а **что видно в UI** лучше ограничивать `deployment.discovery_selectors`. Но **сам по себе** флаг `cluster_wide_access=true` не «чинит» отсутствующие RBAC-ресурсы. ([kiali.io][2])
+
+---
+
+## Что проверить прямо сейчас
+
+1. **Есть ли ресурс в самом релизе Helm**
+
+```bash
+helm get manifest -n kiali kiali-server | grep -n "kiali-controlplane" -A4 -B4
+```
+
+Если ничего не найдено — ваш релиз (или форк чарта) **не создаёт** этот биндинг.
+
+2. **Правильный subject у биндинга**
+
+```bash
+kubectl get clusterrolebinding kiali -o yaml | grep -A5 subjects:
+# Ожидаем: kind: ServiceAccount / name: kiali / namespace: kiali
+```
+
+3. **SA в деплойменте**
+
+```bash
+kubectl get deploy -n kiali kiali -o jsonpath='{.spec.template.spec.serviceAccountName}{"\n"}'
+# Должно быть: kiali
+```
+
+4. **Права SA на ключевые ресурсы**
+
+```bash
+kubectl auth can-i --as=system:serviceaccount:kiali:kiali list namespaces
+kubectl auth can-i --as=system:serviceaccount:kiali:kiali list virtualservices.networking.istio.io -A
+```
+
+Если `list namespaces = no`, селекторы видимости **не будут работать**. ([kiali.io][3])
+
+---
+
+## Почему биндинга может не быть
+
+* Установили `kiali-server` **раньше** в другом NS (например, `istio-system`), потом переместили Kiali в `kiali`, а RoleBinding остался с subject на старый NS.
+* **Helm не имел прав** создавать Role/RoleBinding в `istio-system` → ресурс не создался (проверьте события/логи установки).
+* Используется **обёртка/дистрибутив** (Rancher/BB/свой чарт), где RBAC изменён.
+* Чарт/values модифицированы (некоторые обёртки позволяют **выключать** создание RBAC).
+
+---
+
+## Как починить
+
+### Вариант 1 — «правильно» через Helm (рекомендую)
+
+Сделайте `helm upgrade` тем же чартом/версией, убедившись, что:
+
+* релиз в NS `kiali`;
+* `deployment.cluster_wide_access=true` (для server-чарта это требование);
+* корректно задан **control plane NS** (в современных релизах Kiali больше не читает старые поля `istio_namespace`, но RBAC к control plane чарт всё равно рендерит; а в **discovery selectors** нужно включить NS control plane, иначе он не будет виден в UI). ([kiali.io][4])
+
+Проверить итоговые манифесты перед применением:
+
+```bash
+helm template -n kiali kiali-server kiali/kiali-server \
+  --set deployment.cluster_wide_access=true \
+  | grep -n "RoleBinding" -A6 -B6
+```
+
+### Вариант 2 — быстро создать вручную (если helm сейчас не трогаем)
+
+> Подставьте ваш namespace установки Kiali в `subjects.namespace` (ниже — `kiali`).
+> Если `Role kiali-controlplane` тоже отсутствует — примените оба манифеста.
+
+```yaml
+# Role в istio-system (минимум как в чартовых шаблонах)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kiali-controlplane
+  namespace: istio-system
+rules:
+  - apiGroups: [""]
+    resourceNames:
+      - cacerts
+      - istio-ca-secret
+    resources:
+      - secrets
+    verbs: ["get","list","watch"]
+---
+# RoleBinding в istio-system к SA из ns kiali
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kiali-controlplane
+  namespace: istio-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kiali-controlplane
+subjects:
+  - kind: ServiceAccount
+    name: kiali
+    namespace: kiali
+```
+
+Это соответствует историческим шаблонам `kiali-server` (имена те же). ([GitHub][1])
+
+---
+
+## Итог
+
+* **Да,** нужный RoleBinding **должен был приехать из Helm-чарта** при установке/обновлении.
+* Если его нет — чините через `helm upgrade` (предпочтительно) или создайте Role/RoleBinding вручную, как выше.
+* И не забудьте: чтобы Kiali **видел только mesh-NS**, добавьте `deployment.discovery_selectors` и **включите в них control plane NS**, иначе он может быть скрыт в UI. ([kiali.io][5])
+
+Если пришлёшь вывод `helm get values -n kiali kiali-server` и `helm get manifest…`, быстро укажу точную причину, почему биндинг не создался в твоём релизе.
+
+[1]: https://raw.githubusercontent.com/istio/istio/release-1.18/samples/addons/kiali.yaml?utm_source=chatgpt.com "https://raw.githubusercontent.com/istio/istio/rele..."
+[2]: https://kiali.io/docs/faq/installation/?utm_source=chatgpt.com "Installation"
+[3]: https://kiali.io/docs/configuration/rbac/?utm_source=chatgpt.com "Namespace access control"
+[4]: https://kiali.io/news/release-notes/?utm_source=chatgpt.com "Release Notes"
+[5]: https://kiali.io/docs/configuration/namespace-management/?utm_source=chatgpt.com "Namespace Management"
+
+
+---
+---
+---
+
