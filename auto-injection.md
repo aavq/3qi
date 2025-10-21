@@ -453,3 +453,351 @@ subjects:
 ---
 ---
 
+
+Отлично, собрал для тебя «боевой набор» проверок — от самых быстрых до глубоких (PromQL, события, HPA, квоты, throttling). Всё copy-paste.
+
+# 1) Быстрые sanity-чек-листы (kubectl)
+
+**Состояние пода, рестарты, OOM:**
+
+```bash
+kubectl -n kiali get pods -o wide
+kubectl -n kiali describe pod -l app=kiali | sed -n '1,200p'   # Events, OOMKilled, Liveness/Readiness
+kubectl -n kiali get events --sort-by=.lastTimestamp | tail -n 50
+```
+
+**Фактическое потребление (нужен metrics-server):**
+
+```bash
+kubectl -n kiali top pod -l app=kiali
+kubectl -n kiali top pod -l app=kiali --containers   # если несколько контейнеров
+```
+
+**Проверка RBAC/квот/лимитов в неймспейсе:**
+
+```bash
+kubectl -n kiali get resourcequota -o wide
+kubectl -n kiali describe resourcequota
+kubectl -n kiali get limitrange -o yaml
+```
+
+**Проверка HPA (если включён):**
+
+```bash
+kubectl -n kiali get hpa
+kubectl -n kiali describe hpa kiali
+```
+
+**Убедиться, что деплойменти/реплики не зажаты квотами/лимитами:**
+
+```bash
+kubectl -n kiali describe deploy kiali | sed -n '1,200p'
+kubectl -n kiali get rs -l app=kiali
+```
+
+---
+
+# 2) Бенчмарк-критерии «всё ок»
+
+Обычно «здоровый» профиль такой:
+
+* **CPU**: p95 < **70% от лимита**, throttling < **10%**.
+* **RAM**: Working Set < **80% от лимита**, **0** OOMKilled.
+* **HPA**: не «упирается» постоянно в maxReplicas; масштабируется вверх/вниз.
+* **Квоты**: используемые requests/limits < **85%** квот.
+
+---
+
+# 3) PromQL — текущая утилизация CPU/RAM vs лимиты
+
+> Подставь `namespace="kiali"` и `pod=~"kiali-.*"` (или свой label-selector). Метрики от **kube-state-metrics** и **cAdvisor**/**kubelet**.
+
+**CPU usage (в ядрах) по pod (p5m):**
+
+```promql
+sum by (pod) (
+  rate(container_cpu_usage_seconds_total{namespace="kiali", pod=~"kiali-.*", image!=""}[5m])
+)
+```
+
+**CPU limit по pod (ядра):**
+
+```promql
+sum by (pod) (
+  kube_pod_container_resource_limits{namespace="kiali", pod=~"kiali-.*", resource="cpu"}
+)
+```
+
+**CPU usage / limit (доля):**
+
+```promql
+sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="kiali", pod=~"kiali-.*", image!=""}[5m]))
+/
+sum by (pod) (kube_pod_container_resource_limits{namespace="kiali", pod=~"kiali-.*", resource="cpu"})
+```
+
+**Memory working set (байты) по pod:**
+
+```promql
+sum by (pod) (container_memory_working_set_bytes{namespace="kiali", pod=~"kiali-.*", image!=""})
+```
+
+**Memory limit (байты) по pod:**
+
+```promql
+sum by (pod) (kube_pod_container_resource_limits{namespace="kiali", pod=~"kiali-.*", resource="memory"})
+```
+
+**Memory usage / limit (доля):**
+
+```promql
+sum by (pod) (container_memory_working_set_bytes{namespace="kiali", pod=~"kiali-.*", image!=""})
+/
+sum by (pod) (kube_pod_container_resource_limits{namespace="kiali", pod=~"kiali-.*", resource="memory"})
+```
+
+---
+
+# 4) Поиск OOM и «горячих» рестартов
+
+**Количество рестартов контейнеров за последние 6 часов:**
+
+```promql
+sum by (pod) (
+  increase(kube_pod_container_status_restarts_total{namespace="kiali", pod=~"kiali-.*"}[6h])
+)
+```
+
+**Последняя причина завершения контейнера (OOMKilled):**
+
+```promql
+max by (pod, container) (
+  kube_pod_container_status_last_terminated_reason{namespace="kiali", pod=~"kiali-.*"} == "OOMKilled"
+)
+```
+
+---
+
+# 5) CPU throttling (CFS) — детектор упора в лимит
+
+> В разных сборках возможны метрики `container_cpu_cfs_throttled_seconds_total` и `container_cpu_cfs_periods_total`. Если второй нет, смотри **ratio по throttled_seconds / usage_seconds** как эвристику.
+
+**Доля «задушенных» периодов (если есть *_periods_total):**
+
+```promql
+sum by (pod) (rate(container_cpu_cfs_throttled_periods_total{namespace="kiali", pod=~"kiali-.*"}[5m]))
+/
+sum by (pod) (rate(container_cpu_cfs_periods_total{namespace="kiali", pod=~"kiali-.*"}[5m]))
+```
+
+**Эвристика throttling (если *_periods_total недоступны):**
+
+```promql
+sum by (pod) (rate(container_cpu_cfs_throttled_seconds_total{namespace="kiali", pod=~"kiali-.*"}[5m]))
+/
+sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="kiali", pod=~"kiali-.*", image!=""}[5m]) + 1e-9)
+```
+
+> **Порог:** устойчиво >0.1 (10%) — признак, что **лимит CPU слишком низкий** для нагрузки Kiali.
+
+---
+
+# 6) Запас по requests (на предмет preemption/долгой инициализации)
+
+**Сумма requests vs limits по namespace:**
+
+```promql
+sum(kube_pod_container_resource_requests{namespace="kiali", resource="cpu"})
+sum(kube_pod_container_resource_limits{namespace="kiali", resource="cpu"})
+sum(kube_pod_container_resource_requests{namespace="kiali", resource="memory"})
+sum(kube_pod_container_resource_limits{namespace="kiali", resource="memory"})
+```
+
+**Сколько реально используется в сравнении с requests (CPU):**
+
+```promql
+sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="kiali", pod=~"kiali-.*", image!=""}[5m]))
+/
+sum by (pod) (kube_pod_container_resource_requests{namespace="kiali", pod=~"kiali-.*", resource="cpu"})
+```
+
+> Если стабильно >> 1.0 — requests занижены (риск throttling/подвисаний при упоре ноды).
+
+---
+
+# 7) Проверки квот (ResourceQuota) — хватает ли места для HPA/скейлинга
+
+**Использование/лимиты квот (CPU, memory, pods) по namespace:**
+
+```promql
+# hard
+sum by (resource) (kube_resourcequota{namespace="kiali", type="hard"})
+# used
+sum by (resource) (kube_resourcequota{namespace="kiali", type="used"})
+```
+
+**Сумма лимитов контейнеров против квоты limits.cpu:**
+
+```promql
+sum(kube_pod_container_resource_limits{namespace="kiali", resource="cpu"})
+/
+sum(kube_resourcequota{namespace="kiali", resource="limits.cpu", type="hard"})
+```
+
+**Количество pod против квоты pods:**
+
+```promql
+count(kube_pod_info{namespace="kiali"}) 
+/
+sum(kube_resourcequota{namespace="kiali", resource="pods", type="hard"})
+```
+
+> Если **used/hard > 0.85**, квоту расширить, иначе HPA не поднимет реплики.
+
+---
+
+# 8) HPA — реально ли масштабируется
+
+**Текущее состояние HPA:**
+
+```promql
+kube_horizontalpodautoscaler_status_current_replicas{namespace="kiali", horizontalpodautoscaler="kiali"}
+kube_horizontalpodautoscaler_status_desired_replicas{namespace="kiali", horizontalpodautoscaler="kiali"}
+```
+
+**Упирается ли HPA в максимум:**
+
+```promql
+max_over_time(
+  (kube_horizontalpodautoscaler_status_desired_replicas{namespace="kiali", horizontalpodautoscaler="kiali"}
+   >= kube_horizontalpodautoscaler_spec_max_replicas{namespace="kiali", horizontalpodautoscaler="kiali"})[1h]
+)
+```
+
+> Возвращает 1, если за последний час желаемые реплики = maxReplicas (нужно поднять maxReplicas/лимиты/квоты).
+
+---
+
+# 9) Backend-зависимости Kiali (Prometheus/Tracing) — не «тянут» ли вниз
+
+**Латентность Prometheus query_range (p95):**
+
+```promql
+histogram_quantile(0.95,
+  sum by (le) (
+    rate(prometheus_http_request_duration_seconds_bucket{handler="/api/v1/query_range"}[5m])
+  )
+)
+```
+
+> Если пикает в секунды/десятки секунд — Kiali «тормозит» не из-за своих ресурсов, а из-за Prometheus.
+
+**Ошибки HTTP 5xx у Prometheus API:**
+
+```promql
+sum(rate(prometheus_http_requests_total{code=~"5.."}[5m]))
+```
+
+---
+
+# 10) Признаки «узких мест» в логах Kiali
+
+```bash
+kubectl -n kiali logs deploy/kiali --tail=500 | egrep -i \
+"(throttl|rate limit|oom|alloc|out of memory|deadline|timeout|too many open files|429|5..)"
+```
+
+* `throttl` — часто намёк на CFS throttling или server-side rate-limit k8s API.
+* `timeout/deadline exceeded` — медленный Prometheus/Jaeger/k8s API.
+
+---
+
+# 11) Точечные действия, если что-то «краснеет»
+
+* **CPU usage/Throttling высокие:**
+  Поднять `limits.cpu` (и, при необходимости, `requests.cpu`) на 25–50%; для пиков — увеличить `maxReplicas` HPA.
+
+* **Memory usage/limit >80% или OOMKilled:**
+  Поднять `limits.memory` на 30–50% (Kiali строит большие графы → всплески RAM). Параллельно сократить «тяжесть» графа (меньше NS/интервал, убрать «security/response time» метрики по умолчанию).
+
+* **HPA упёрся в maxReplicas:**
+  Увеличить `maxReplicas` + проверить квоты (`limits.cpu/memory`, `pods`).
+
+* **Quotas близко к hard:**
+  Расширить ResourceQuota или переместить Kiali в отдельный ns без жёстких квот.
+
+* **Медленный Prometheus:**
+  Урезать период графа по умолчанию, включить downsampling/recording rules, оптимизировать retention и ресурсы Prometheus.
+
+---
+
+# 12) Мини-алерты (PrometheusRule) на базовые симптомы
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kiali-health
+  namespace: monitoring
+spec:
+  groups:
+  - name: kiali
+    rules:
+    - alert: KialiCpuThrottlingHigh
+      expr: |
+        (
+          sum(rate(container_cpu_cfs_throttled_seconds_total{namespace="kiali", pod=~"kiali-.*"}[5m]))
+          /
+          sum(rate(container_cpu_usage_seconds_total{namespace="kiali", pod=~"kiali-.*", image!=""}[5m]) + 1e-9)
+        ) > 0.1
+      for: 10m
+      labels: {severity: warning}
+      annotations:
+        summary: "Kiali CPU throttling >10%"
+
+    - alert: KialiMemoryNearLimit
+      expr: |
+        (
+          sum(container_memory_working_set_bytes{namespace="kiali", pod=~"kiali-.*", image!=""})
+          /
+          sum(kube_pod_container_resource_limits{namespace="kiali", pod=~"kiali-.*", resource="memory"})
+        ) > 0.8
+      for: 10m
+      labels: {severity: warning}
+      annotations:
+        summary: "Kiali memory >80% of limit"
+
+    - alert: KialiOOMKilled
+      expr: |
+        increase(kube_pod_container_status_restarts_total{namespace="kiali", pod=~"kiali-.*"}[30m]) > 0
+      for: 1m
+      labels: {severity: critical}
+      annotations:
+        summary: "Kiali restarted (possible OOM)"
+
+    - alert: KialiHpaAtMax
+      expr: |
+        max_over_time(
+          (kube_horizontalpodautoscaler_status_desired_replicas{namespace="kiali", horizontalpodautoscaler="kiali"}
+          >= kube_horizontalpodautoscaler_spec_max_replicas{namespace="kiali", horizontalpodautoscaler="kiali"})[15m]
+        ) == 1
+      for: 15m
+      labels: {severity: warning}
+      annotations:
+        summary: "Kiali HPA at maxReplicas ≥15m"
+```
+
+---
+
+# 13) Что потестировать руками (нагрузочный сценарий для Kiali)
+
+1. В UI построй **Graph** на **все видимые NS** (через discovery selectors) за **30–60 мин**.
+2. Открой **Workloads** с валидациями и фильтрами метрик.
+3. Запусти параллельно PromQL из секций 3–5 и смотри пики по RAM/CPU/throttling.
+
+Если хочешь, скидывай вывод нескольких команд (`kubectl top`, `describe hpa`, результаты PromQL) — подберём точные `requests/limits`, `HPA` и квоты под твой профиль.
+
+---
+---
+---
+
