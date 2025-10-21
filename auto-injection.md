@@ -129,3 +129,25 @@ kubectl annotate kiali kiali -n kiali --overwrite trigger-reconcile="$(date)"
 Если хочешь, могу сгенерировать готовые манифесты под твою сетку ревизий (`istio.io/rev`), control plane и изоляцию служебных NS.
 
 [1]: https://kiali.io/docs/configuration/namespace-management/ "Namespace Management | Kiali"
+
+
+---
+---
+---
+
+Да. Я перепроверил по актуальным докам Kiali (обновлены 12 сен 2025) — всё, что я написал, соответствует реальности:
+
+* Начиная с **Kiali 2.0** параметры вроде `deployment.accessible_namespaces` и `api.namespaces.*` **удалены**. Вместо них используются **`deployment.cluster_wide_access`** и **`deployment.discovery_selectors`**. ([kiali.io][1])
+* **Server Helm Chart** не создаёт per-namespace `Role/RoleBinding` по селекторам — значит для него нужен **`cluster_wide_access: true`**; при этом **`discovery_selectors`** ограничивают **видимые** в UI неймспейсы (динамически). ([kiali.io][1])
+* **Kiali Operator** при `cluster_wide_access: false` по `spec.deployment.discovery_selectors.default` находит подходящие NS и **создаёт Roles** в них (минимальные права). Для автоподхвата новых NS можно задать аннотацию **`ansible.sdk.operatorframework.io/reconcile-period: 60s`** или «триггерить» reconcile аннотацией. ([kiali.io][1])
+* **Важно:** Kiali **не читает** Istio MeshConfig discoverySelectors — указывайте те же селекторы **в Kiali** отдельно. Также убедитесь, что в селекторах есть **namespace(ы) control plane** Istio. ([kiali.io][1])
+* Метки для автоматической инъекции в NS — это стандартные `istio-injection=enabled` (classic) и/или `istio.io/rev=<revision>` (revision-based). ([Istio][2])
+
+Если нужно, сгенерирую тебе готовые `values.yaml` (server chart) или `Kiali` CR (operator) под твою схему меток и ревизий.
+
+[1]: https://kiali.io/docs/configuration/namespace-management/ "Namespace Management | Kiali"
+[2]: https://istio.io/latest/docs/setup/additional-setup/sidecar-injection/?utm_source=chatgpt.com "Installing the Sidecar"
+
+---
+---
+---
